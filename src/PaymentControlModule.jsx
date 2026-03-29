@@ -1068,6 +1068,207 @@ function TemplatesView({ templates, setTemplates }) {
 // Controls Panel
 function ControlsPanel() {
   const [activeControlTab, setActiveControlTab] = useState('amount');
+  const [editingControl, setEditingControl] = useState(null);
+  
+  // Sample controls state
+  const [amountLimits, setAmountLimits] = useState({
+    singlePaymentMax: { value: 1000000, enabled: true, label: 'Single Payment Maximum', description: 'Maximum amount for any single payment' },
+    dailyLimit: { value: 5000000, enabled: true, label: 'Daily Limit', description: 'Maximum total payments per day' },
+    weeklyLimit: { value: 15000000, enabled: true, label: 'Weekly Limit', description: 'Maximum total payments per week' },
+    monthlyLimit: { value: 50000000, enabled: true, label: 'Monthly Limit', description: 'Maximum total payments per month' },
+    sightVerificationThreshold: { value: 10000, enabled: true, label: 'Sight Verification Threshold', description: 'Below this: sight verification only' },
+    amountVerificationThreshold: { value: 50000, enabled: true, label: 'Amount Verification Threshold', description: 'Above this: require amount re-entry' },
+    fullVerificationThreshold: { value: 250000, enabled: true, label: 'Full Verification Threshold', description: 'Above this: require all details re-entry' },
+  });
+
+  const [timeControls, setTimeControls] = useState({
+    operatingHoursStart: { value: '08:00', enabled: true, label: 'Operating Hours Start', description: 'Payments allowed after this time' },
+    operatingHoursEnd: { value: '18:00', enabled: true, label: 'Operating Hours End', description: 'Payments blocked after this time' },
+    weekendPayments: { value: false, enabled: true, label: 'Allow Weekend Payments', description: 'Permit payments on Saturday/Sunday' },
+    holidayPayments: { value: false, enabled: true, label: 'Allow Holiday Payments', description: 'Permit payments on bank holidays' },
+    pendingExpirationHours: { value: 24, enabled: true, label: 'Pending Expiration (Hours)', description: 'Auto-expire pending approvals after' },
+    cooldownMinutes: { value: 5, enabled: false, label: 'Duplicate Cooldown (Minutes)', description: 'Block similar payments within timeframe' },
+  });
+
+  const [approvalMatrix, setApprovalMatrix] = useState({
+    tier1Threshold: { value: 10000, approvers: 1, label: 'Tier 1', description: 'Up to $10,000' },
+    tier2Threshold: { value: 50000, approvers: 1, label: 'Tier 2', description: '$10,001 - $50,000' },
+    tier3Threshold: { value: 250000, approvers: 2, label: 'Tier 3', description: '$50,001 - $250,000' },
+    tier4Threshold: { value: 1000000, approvers: 3, label: 'Tier 4', description: '$250,001 - $1,000,000' },
+    requireDifferentDepartment: { value: 250000, enabled: true, label: 'Different Department Required Above', description: 'Require approver from different department' },
+    makerCheckerEnabled: { value: true, enabled: true, label: 'Maker ≠ Checker', description: 'Initiator cannot approve own payments' },
+  });
+
+  const [velocityControls, setVelocityControls] = useState({
+    maxPaymentsPerHour: { value: 20, enabled: true, label: 'Max Payments Per Hour', description: 'Per-user hourly payment limit' },
+    maxPaymentsPerDay: { value: 100, enabled: true, label: 'Max Payments Per Day', description: 'Per-user daily payment count' },
+    maxRecipientsPerDay: { value: 25, enabled: true, label: 'Max Unique Recipients Per Day', description: 'Limit new recipients per day' },
+    newRecipientDelay: { value: 0, enabled: false, label: 'New Recipient Delay (Hours)', description: 'Wait time before sending to new recipient' },
+    largePaymentCooldown: { value: 30, enabled: true, label: 'Large Payment Cooldown (Minutes)', description: 'Delay between payments over $100K' },
+    suspiciousPatternAlert: { value: true, enabled: true, label: 'Suspicious Pattern Alerts', description: 'Alert on unusual payment patterns' },
+  });
+
+  const handleSaveControl = (category, key, newValue) => {
+    switch(category) {
+      case 'amount':
+        setAmountLimits({ ...amountLimits, [key]: { ...amountLimits[key], value: newValue } });
+        break;
+      case 'time':
+        setTimeControls({ ...timeControls, [key]: { ...timeControls[key], value: newValue } });
+        break;
+      case 'approval':
+        setApprovalMatrix({ ...approvalMatrix, [key]: { ...approvalMatrix[key], value: newValue } });
+        break;
+      case 'velocity':
+        setVelocityControls({ ...velocityControls, [key]: { ...velocityControls[key], value: newValue } });
+        break;
+    }
+    setEditingControl(null);
+  };
+
+  const handleToggleControl = (category, key) => {
+    switch(category) {
+      case 'amount':
+        setAmountLimits({ ...amountLimits, [key]: { ...amountLimits[key], enabled: !amountLimits[key].enabled } });
+        break;
+      case 'time':
+        setTimeControls({ ...timeControls, [key]: { ...timeControls[key], enabled: !timeControls[key].enabled } });
+        break;
+      case 'approval':
+        setApprovalMatrix({ ...approvalMatrix, [key]: { ...approvalMatrix[key], enabled: !approvalMatrix[key].enabled } });
+        break;
+      case 'velocity':
+        setVelocityControls({ ...velocityControls, [key]: { ...velocityControls[key], enabled: !velocityControls[key].enabled } });
+        break;
+    }
+  };
+
+  const renderControlItem = (category, key, control, isCurrency = false, isTime = false, isBoolean = false) => {
+    const isEditing = editingControl === `${category}-${key}`;
+    
+    return (
+      <div key={key} className={`p-4 rounded-lg border ${control.enabled ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-100'}`}>
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h4 className={`font-medium ${control.enabled ? 'text-gray-800' : 'text-gray-400'}`}>{control.label}</h4>
+              {!control.enabled && <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-500 rounded-full">Disabled</span>}
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">{control.description}</p>
+          </div>
+          <button
+            onClick={() => handleToggleControl(category, key)}
+            className={`w-10 h-6 rounded-full transition-colors flex-shrink-0 ml-4 ${control.enabled ? 'bg-blue-600' : 'bg-gray-300'}`}
+          >
+            <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${control.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+          </button>
+        </div>
+        
+        {control.enabled && (
+          <div className="mt-3 flex items-center gap-3">
+            {isEditing ? (
+              <div className="flex items-center gap-2">
+                {isBoolean ? (
+                  <select
+                    defaultValue={control.value.toString()}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                    onChange={(e) => handleSaveControl(category, key, e.target.value === 'true')}
+                  >
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                ) : isTime ? (
+                  <input
+                    type="time"
+                    defaultValue={control.value}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                    onBlur={(e) => handleSaveControl(category, key, e.target.value)}
+                  />
+                ) : (
+                  <div className="flex items-center">
+                    {isCurrency && <span className="text-gray-500 mr-1">$</span>}
+                    <input
+                      type="number"
+                      defaultValue={control.value}
+                      className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-right"
+                      onBlur={(e) => handleSaveControl(category, key, parseFloat(e.target.value))}
+                      autoFocus
+                    />
+                  </div>
+                )}
+                <button
+                  onClick={() => setEditingControl(null)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600"
+                >
+                  <XCircle className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditingControl(`${category}-${key}`)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
+              >
+                {isBoolean ? (
+                  <span>{control.value ? 'Yes' : 'No'}</span>
+                ) : isTime ? (
+                  <span>{control.value}</span>
+                ) : (
+                  <span>{isCurrency ? `$${control.value.toLocaleString()}` : control.value.toLocaleString()}</span>
+                )}
+                <Edit className="w-3 h-3 text-gray-400" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderApprovalTier = (key, tier) => {
+    const isEditing = editingControl === `approval-${key}`;
+    
+    return (
+      <div key={key} className="p-4 bg-white rounded-lg border border-gray-200">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="font-medium text-gray-800">{tier.label}</h4>
+            <p className="text-sm text-gray-500">{tier.description}</p>
+          </div>
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              <select
+                defaultValue={tier.approvers}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                onChange={(e) => {
+                  setApprovalMatrix({ 
+                    ...approvalMatrix, 
+                    [key]: { ...tier, approvers: parseInt(e.target.value) } 
+                  });
+                  setEditingControl(null);
+                }}
+              >
+                {[1, 2, 3, 4, 5].map(n => (
+                  <option key={n} value={n}>{n} approver{n > 1 ? 's' : ''}</option>
+                ))}
+              </select>
+              <button onClick={() => setEditingControl(null)} className="p-1.5 text-gray-400 hover:text-gray-600">
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setEditingControl(`approval-${key}`)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm font-medium text-blue-700 transition-colors"
+            >
+              <Users className="w-4 h-4" />
+              {tier.approvers} approver{tier.approvers > 1 ? 's' : ''}
+              <Edit className="w-3 h-3 text-blue-400" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="grid grid-cols-4 gap-6">
@@ -1092,11 +1293,98 @@ function ControlsPanel() {
       </div>
 
       <div className="col-span-3 bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-        <EmptyState
-          icon={Shield}
-          title="Controls Configuration"
-          description="Configure payment limits, approval thresholds, time-based rules, and velocity controls to manage risk."
-        />
+        {activeControlTab === 'amount' && (
+          <div className="space-y-4">
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-800">Amount Limits</h3>
+              <p className="text-sm text-gray-500">Configure maximum payment amounts and verification thresholds</p>
+            </div>
+            
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payment Limits</h4>
+              {renderControlItem('amount', 'singlePaymentMax', amountLimits.singlePaymentMax, true)}
+              {renderControlItem('amount', 'dailyLimit', amountLimits.dailyLimit, true)}
+              {renderControlItem('amount', 'weeklyLimit', amountLimits.weeklyLimit, true)}
+              {renderControlItem('amount', 'monthlyLimit', amountLimits.monthlyLimit, true)}
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Verification Thresholds</h4>
+              {renderControlItem('amount', 'sightVerificationThreshold', amountLimits.sightVerificationThreshold, true)}
+              {renderControlItem('amount', 'amountVerificationThreshold', amountLimits.amountVerificationThreshold, true)}
+              {renderControlItem('amount', 'fullVerificationThreshold', amountLimits.fullVerificationThreshold, true)}
+            </div>
+          </div>
+        )}
+
+        {activeControlTab === 'time' && (
+          <div className="space-y-4">
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-800">Time-Based Controls</h3>
+              <p className="text-sm text-gray-500">Configure operating hours and time-related restrictions</p>
+            </div>
+            
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Operating Hours</h4>
+              {renderControlItem('time', 'operatingHoursStart', timeControls.operatingHoursStart, false, true)}
+              {renderControlItem('time', 'operatingHoursEnd', timeControls.operatingHoursEnd, false, true)}
+              {renderControlItem('time', 'weekendPayments', timeControls.weekendPayments, false, false, true)}
+              {renderControlItem('time', 'holidayPayments', timeControls.holidayPayments, false, false, true)}
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Timing Rules</h4>
+              {renderControlItem('time', 'pendingExpirationHours', timeControls.pendingExpirationHours)}
+              {renderControlItem('time', 'cooldownMinutes', timeControls.cooldownMinutes)}
+            </div>
+          </div>
+        )}
+
+        {activeControlTab === 'approval' && (
+          <div className="space-y-4">
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-800">Approval Matrix</h3>
+              <p className="text-sm text-gray-500">Configure approval requirements based on payment amounts</p>
+            </div>
+            
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Approval Tiers</h4>
+              {renderApprovalTier('tier1Threshold', approvalMatrix.tier1Threshold)}
+              {renderApprovalTier('tier2Threshold', approvalMatrix.tier2Threshold)}
+              {renderApprovalTier('tier3Threshold', approvalMatrix.tier3Threshold)}
+              {renderApprovalTier('tier4Threshold', approvalMatrix.tier4Threshold)}
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Additional Rules</h4>
+              {renderControlItem('approval', 'requireDifferentDepartment', approvalMatrix.requireDifferentDepartment, true)}
+              {renderControlItem('approval', 'makerCheckerEnabled', approvalMatrix.makerCheckerEnabled, false, false, true)}
+            </div>
+          </div>
+        )}
+
+        {activeControlTab === 'velocity' && (
+          <div className="space-y-4">
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-800">Velocity Controls</h3>
+              <p className="text-sm text-gray-500">Configure rate limits and pattern-based restrictions</p>
+            </div>
+            
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Rate Limits</h4>
+              {renderControlItem('velocity', 'maxPaymentsPerHour', velocityControls.maxPaymentsPerHour)}
+              {renderControlItem('velocity', 'maxPaymentsPerDay', velocityControls.maxPaymentsPerDay)}
+              {renderControlItem('velocity', 'maxRecipientsPerDay', velocityControls.maxRecipientsPerDay)}
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Cooldowns & Alerts</h4>
+              {renderControlItem('velocity', 'newRecipientDelay', velocityControls.newRecipientDelay)}
+              {renderControlItem('velocity', 'largePaymentCooldown', velocityControls.largePaymentCooldown)}
+              {renderControlItem('velocity', 'suspiciousPatternAlert', velocityControls.suspiciousPatternAlert, false, false, true)}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
