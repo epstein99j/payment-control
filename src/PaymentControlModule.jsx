@@ -1508,35 +1508,6 @@ function FIAdminPanel({ currentUser }) {
   );
 }
 
-// EmptyState component for admin panels
-function EmptyState({ icon: Icon, title, description, action }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 px-4">
-      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-        <Icon className="w-8 h-8 text-gray-400" />
-      </div>
-      <h3 className="text-lg font-medium text-gray-800 mb-2">{title}</h3>
-      <p className="text-sm text-gray-500 text-center max-w-md mb-4">{description}</p>
-      {action}
-    </div>
-  );
-}
-
-// Status Badge for admin
-function StatusBadge({ status }) {
-  const styles = {
-    active: 'bg-green-100 text-green-800 border-green-200',
-    inactive: 'bg-gray-100 text-gray-600 border-gray-200',
-    pending: 'bg-amber-100 text-amber-800 border-amber-200',
-    suspended: 'bg-red-100 text-red-800 border-red-200',
-  };
-  return (
-    <span className={`px-2 py-0.5 text-xs font-medium rounded-full border capitalize ${styles[status] || styles.inactive}`}>
-      {status}
-    </span>
-  );
-}
-
 // Admin Users Panel
 function AdminUsersPanel({ users, setUsers, roles, departments, isSuperAdmin, onCreateUser }) {
   const [search, setSearch] = useState('');
