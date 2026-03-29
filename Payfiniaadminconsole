@@ -1,0 +1,1803 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Bell, Shield, Clock, Users, FileText, Settings, Send, CheckCircle,
+  XCircle, AlertTriangle, ChevronRight, Plus, Search, Download,
+  Zap, Activity, Eye, Edit, Trash2, Copy, Mail, MessageSquare,
+  Webhook, ToggleLeft, ToggleRight, Calendar, DollarSign, ArrowUpRight,
+  RefreshCw, Power, Router, Building2, Hash, Loader2, UserCheck, Briefcase,
+  Lock, Fingerprint, Phone, PenTool, Link, Key, TestTube, Globe, Save,
+  Building, UserPlus, ShieldCheck, Sliders, ClipboardList, AlertOctagon,
+  ChevronDown, ChevronUp, MoreVertical, LogOut, UserCog, Layers, Check,
+  X, Info, HelpCircle, ExternalLink, ArrowRight, Filter, UserX
+} from 'lucide-react';
+
+// ============================================================================
+// DATA STRUCTURES
+// ============================================================================
+
+// Permission definitions - building blocks for roles
+const PERMISSION_DEFINITIONS = {
+  // Payment Permissions
+  initiate_payments: { label: 'Initiate Payments', category: 'Payments', description: 'Create new payment requests' },
+  approve_payments: { label: 'Approve Payments', category: 'Payments', description: 'Approve others\' payments (up to role limit)' },
+  reject_payments: { label: 'Reject Payments', category: 'Payments', description: 'Reject payment requests' },
+  cancel_payments: { label: 'Cancel Payments', category: 'Payments', description: 'Cancel pending payments' },
+  view_all_payments: { label: 'View All Payments', category: 'Payments', description: 'See payments beyond own' },
+  
+  // Template Permissions
+  create_templates: { label: 'Create Templates', category: 'Templates', description: 'Add new payment templates' },
+  edit_templates: { label: 'Edit Templates', category: 'Templates', description: 'Modify existing templates' },
+  delete_templates: { label: 'Delete Templates', category: 'Templates', description: 'Remove templates' },
+  use_templates: { label: 'Use Templates', category: 'Templates', description: 'Initiate payments from templates' },
+  
+  // User Management
+  view_users: { label: 'View Users', category: 'User Management', description: 'See user list' },
+  create_users: { label: 'Create Users', category: 'User Management', description: 'Add new users' },
+  edit_users: { label: 'Edit Users', category: 'User Management', description: 'Modify user details/roles' },
+  disable_users: { label: 'Disable Users', category: 'User Management', description: 'Deactivate accounts' },
+  
+  // Control Management
+  view_controls: { label: 'View Controls', category: 'Controls', description: 'See limits, thresholds' },
+  edit_controls: { label: 'Edit Controls', category: 'Controls', description: 'Modify limits, thresholds' },
+  
+  // Role Management
+  view_roles: { label: 'View Roles', category: 'Role Management', description: 'See role definitions' },
+  create_roles: { label: 'Create Roles', category: 'Role Management', description: 'Add new roles' },
+  edit_roles: { label: 'Edit Roles', category: 'Role Management', description: 'Modify role permissions' },
+  delete_roles: { label: 'Delete Roles', category: 'Role Management', description: 'Remove roles' },
+  
+  // Department Management
+  manage_departments: { label: 'Manage Departments', category: 'Organization', description: 'Create/edit departments' },
+  
+  // Audit
+  view_audit_logs: { label: 'View Audit Logs', category: 'Audit', description: 'See all activity logs' },
+  export_audit_logs: { label: 'Export Audit Logs', category: 'Audit', description: 'Download logs' },
+};
+
+const PERMISSION_CATEGORIES = ['Payments', 'Templates', 'User Management', 'Controls', 'Role Management', 'Organization', 'Audit'];
+
+// Default compensating controls for new FIs
+const DEFAULT_COMPENSATING_CONTROLS = {
+  maxSingleTransaction: { enabled: true, value: 1000000 },
+  maxDailyVolume: { enabled: true, value: 10000000 },
+  limitChangeWaitingPeriod: { enabled: false, hours: 24 },
+  minApproversHighValue: { enabled: false, threshold: 250000, minApprovers: 3 },
+  requireMfaForApprovals: { enabled: false },
+  requireDifferentDepartment: { enabled: false, threshold: 500000 },
+  userCreationWaitingPeriod: { enabled: false, hours: 24 },
+  superAdminChangeNotification: { enabled: true },
+};
+
+// Mock Payfinia Admins
+const mockPayfiniaAdmins = [
+  { id: 'PA-001', name: 'Alex Morgan', email: 'amorgan@payfinia.com', role: 'payfinia_admin', createdAt: '2023-01-15' },
+  { id: 'PA-002', name: 'Jordan Lee', email: 'jlee@payfinia.com', role: 'payfinia_admin', createdAt: '2023-03-20' },
+];
+
+// Mock FI Organizations (empty - Payfinia creates these)
+const mockFiOrganizations = [];
+
+// Mock FI Users (empty - created by Payfinia/FI Admins)
+const mockFiUsers = [];
+
+// Mock FI Roles (empty - created by FI Super Admins)
+const mockFiRoles = [];
+
+// Mock FI Departments (empty - created by FI Admins)
+const mockFiDepartments = [];
+
+// Mock Pending Admin Changes (empty - dual approval queue)
+const mockPendingAdminChanges = [];
+
+// Mock Payfinia Notifications
+const mockPayfiniaNotifications = [];
+
+// ============================================================================
+// UTILITY COMPONENTS
+// ============================================================================
+
+const StatusBadge = ({ status, size = 'sm' }) => {
+  const styles = {
+    active: 'bg-green-100 text-green-800 border-green-200',
+    inactive: 'bg-gray-100 text-gray-600 border-gray-200',
+    pending: 'bg-amber-100 text-amber-800 border-amber-200',
+    suspended: 'bg-red-100 text-red-800 border-red-200',
+    pending_approval: 'bg-amber-100 text-amber-800 border-amber-200',
+    approved: 'bg-green-100 text-green-800 border-green-200',
+    rejected: 'bg-red-100 text-red-800 border-red-200',
+  };
+  const sizeClasses = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm';
+  return (
+    <span className={`${sizeClasses} font-medium rounded-full border capitalize ${styles[status] || styles.inactive}`}>
+      {status.replace(/_/g, ' ')}
+    </span>
+  );
+};
+
+const EmptyState = ({ icon: Icon, title, description, action }) => (
+  <div className="flex flex-col items-center justify-center py-16 px-4">
+    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+      <Icon className="w-8 h-8 text-gray-400" />
+    </div>
+    <h3 className="text-lg font-medium text-gray-800 mb-2">{title}</h3>
+    <p className="text-sm text-gray-500 text-center max-w-md mb-4">{description}</p>
+    {action}
+  </div>
+);
+
+const ConfirmModal = ({ title, message, confirmLabel, confirmStyle, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-xl w-full max-w-md shadow-2xl p-6">
+      <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
+      <p className="text-gray-600 mb-6">{message}</p>
+      <div className="flex justify-end gap-3">
+        <button onClick={onCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+          Cancel
+        </button>
+        <button onClick={onConfirm} className={`px-4 py-2 rounded-lg font-medium ${confirmStyle || 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+          {confirmLabel}
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+const InfoTooltip = ({ text }) => (
+  <div className="group relative inline-block ml-1">
+    <HelpCircle className="w-4 h-4 text-gray-400 cursor-help" />
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+      {text}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+    </div>
+  </div>
+);
+
+// ============================================================================
+// PAYFINIA ADMIN CONSOLE
+// ============================================================================
+
+export function PayfiniaAdminConsole() {
+  const [activeTab, setActiveTab] = useState('organizations');
+  const [organizations, setOrganizations] = useState(mockFiOrganizations);
+  const [notifications, setNotifications] = useState(mockPayfiniaNotifications);
+  const [showCreateFI, setShowCreateFI] = useState(false);
+  const [selectedFI, setSelectedFI] = useState(null);
+  const [currentAdmin] = useState(mockPayfiniaAdmins[0]);
+
+  const tabs = [
+    { id: 'organizations', label: 'FI Organizations', icon: Building },
+    { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.read).length },
+    { id: 'audit', label: 'Platform Audit', icon: ClipboardList },
+  ];
+
+  const handleCreateFI = (newFI) => {
+    setOrganizations([...organizations, { ...newFI, id: `FI-${String(organizations.length + 1).padStart(3, '0')}`, createdAt: new Date().toISOString(), createdBy: currentAdmin.id, status: 'active' }]);
+    setShowCreateFI(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-gradient-to-b from-indigo-900 to-indigo-950 text-white flex flex-col">
+        <div className="p-4 border-b border-indigo-700">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg flex items-center justify-center">
+              <Zap className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg">Payfinia</h1>
+              <p className="text-xs text-indigo-300">Admin Console</p>
+            </div>
+          </div>
+        </div>
+        
+        <nav className="flex-1 p-4">
+          <ul className="space-y-1">
+            {tabs.map(tab => (
+              <li key={tab.id}>
+                <button
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all text-sm ${
+                    activeTab === tab.id ? 'bg-indigo-700 text-white' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <tab.icon className="w-5 h-5" />
+                    <span className="font-medium">{tab.label}</span>
+                  </div>
+                  {tab.badge > 0 && (
+                    <span className="px-2 py-0.5 text-xs font-semibold bg-red-500 text-white rounded-full">{tab.badge}</span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="p-4 border-t border-indigo-700">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-indigo-700 rounded-full flex items-center justify-center">
+              <span className="text-sm font-medium">{currentAdmin.name.split(' ').map(n => n[0]).join('')}</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">{currentAdmin.name}</p>
+              <p className="text-xs text-indigo-300">Payfinia Admin</p>
+            </div>
+            <LogOut className="w-5 h-5 text-indigo-300 cursor-pointer hover:text-white" />
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col">
+        <header className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-800">{tabs.find(t => t.id === activeTab)?.label}</h2>
+              <p className="text-sm text-gray-500">Manage FI organizations and platform settings</p>
+            </div>
+            {activeTab === 'organizations' && (
+              <button
+                onClick={() => setShowCreateFI(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                <Plus className="w-4 h-4" />
+                New FI Organization
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="flex-1 p-6 overflow-auto">
+          {activeTab === 'organizations' && (
+            <FIOrganizationsList 
+              organizations={organizations} 
+              onSelect={setSelectedFI}
+              onUpdate={setOrganizations}
+            />
+          )}
+          {activeTab === 'notifications' && (
+            <PayfiniaNotifications notifications={notifications} setNotifications={setNotifications} />
+          )}
+          {activeTab === 'audit' && (
+            <PlatformAuditLog />
+          )}
+        </div>
+      </main>
+
+      {/* Modals */}
+      {showCreateFI && (
+        <CreateFIModal onClose={() => setShowCreateFI(false)} onCreate={handleCreateFI} />
+      )}
+      {selectedFI && (
+        <FIDetailModal fi={selectedFI} onClose={() => setSelectedFI(null)} />
+      )}
+    </div>
+  );
+}
+
+// FI Organizations List
+function FIOrganizationsList({ organizations, onSelect, onUpdate }) {
+  const [search, setSearch] = useState('');
+  
+  const filtered = organizations.filter(org => 
+    org.name.toLowerCase().includes(search.toLowerCase()) ||
+    org.id.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search organizations..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <EmptyState
+            icon={Building}
+            title="No FI organizations yet"
+            description="Create your first FI organization to get started. You'll set up their compensating controls and initial Super Admins."
+          />
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organization</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Super Admins</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map(org => (
+                <tr key={org.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
+                        <Building className="w-5 h-5 text-indigo-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-800">{org.name}</p>
+                        <p className="text-xs text-gray-500">{org.users?.length || 0} users</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600">{org.id}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <span className={`text-sm font-medium ${(org.superAdminCount || 0) < 2 ? 'text-amber-600' : 'text-green-600'}`}>
+                        {org.superAdminCount || 0}
+                      </span>
+                      {(org.superAdminCount || 0) < 2 && (
+                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3"><StatusBadge status={org.status} /></td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{new Date(org.createdAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => onSelect(org)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded">
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Create FI Modal
+function CreateFIModal({ onClose, onCreate }) {
+  const [step, setStep] = useState(1);
+  const [fiData, setFiData] = useState({
+    name: '',
+    legalName: '',
+    taxId: '',
+    primaryContact: { name: '', email: '', phone: '' },
+    address: { street: '', city: '', state: '', zip: '' },
+  });
+  const [compensatingControls, setCompensatingControls] = useState(DEFAULT_COMPENSATING_CONTROLS);
+  const [superAdmins, setSuperAdmins] = useState([
+    { name: '', email: '', phone: '' },
+    { name: '', email: '', phone: '' },
+  ]);
+
+  const handleCreate = () => {
+    onCreate({
+      ...fiData,
+      compensatingControls,
+      superAdmins: superAdmins.filter(sa => sa.email),
+      superAdminCount: superAdmins.filter(sa => sa.email).length,
+    });
+  };
+
+  const isStep1Valid = fiData.name && fiData.primaryContact.email;
+  const isStep2Valid = true; // Controls have defaults
+  const isStep3Valid = superAdmins.filter(sa => sa.name && sa.email).length >= 2;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+      <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl mx-4">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-800">Create FI Organization</h2>
+              <p className="text-sm text-gray-500">Step {step} of 3</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+          {/* Progress */}
+          <div className="flex items-center gap-2 mt-4">
+            {[1, 2, 3].map(s => (
+              <div key={s} className={`flex-1 h-2 rounded-full ${s <= step ? 'bg-indigo-600' : 'bg-gray-200'}`} />
+            ))}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 max-h-[60vh] overflow-y-auto">
+          {step === 1 && (
+            <div className="space-y-6">
+              <h3 className="font-semibold text-gray-800">Organization Details</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Organization Name *</label>
+                  <input
+                    type="text"
+                    value={fiData.name}
+                    onChange={e => setFiData({ ...fiData, name: e.target.value })}
+                    placeholder="First National Bank"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Legal Name</label>
+                  <input
+                    type="text"
+                    value={fiData.legalName}
+                    onChange={e => setFiData({ ...fiData, legalName: e.target.value })}
+                    placeholder="First National Bank, N.A."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tax ID / EIN</label>
+                  <input
+                    type="text"
+                    value={fiData.taxId}
+                    onChange={e => setFiData({ ...fiData, taxId: e.target.value })}
+                    placeholder="XX-XXXXXXX"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <h4 className="font-medium text-gray-700 mt-6">Primary Contact</h4>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                  <input
+                    type="text"
+                    value={fiData.primaryContact.name}
+                    onChange={e => setFiData({ ...fiData, primaryContact: { ...fiData.primaryContact, name: e.target.value } })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                  <input
+                    type="email"
+                    value={fiData.primaryContact.email}
+                    onChange={e => setFiData({ ...fiData, primaryContact: { ...fiData.primaryContact, email: e.target.value } })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    value={fiData.primaryContact.phone}
+                    onChange={e => setFiData({ ...fiData, primaryContact: { ...fiData.primaryContact, phone: e.target.value } })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-semibold text-gray-800">Compensating Controls</h3>
+                <p className="text-sm text-gray-500">Set platform-level limits and requirements for this FI</p>
+              </div>
+
+              <div className="space-y-4">
+                {/* Max Single Transaction */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">Max Single Transaction</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, maxSingleTransaction: { ...compensatingControls.maxSingleTransaction, enabled: !compensatingControls.maxSingleTransaction.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.maxSingleTransaction.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.maxSingleTransaction.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {compensatingControls.maxSingleTransaction.enabled && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">$</span>
+                      <input
+                        type="number"
+                        value={compensatingControls.maxSingleTransaction.value}
+                        onChange={e => setCompensatingControls({ ...compensatingControls, maxSingleTransaction: { ...compensatingControls.maxSingleTransaction, value: parseInt(e.target.value) } })}
+                        className="w-40 px-3 py-1.5 border border-gray-300 rounded-lg text-right"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Max Daily Volume */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">Max Daily Volume</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, maxDailyVolume: { ...compensatingControls.maxDailyVolume, enabled: !compensatingControls.maxDailyVolume.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.maxDailyVolume.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.maxDailyVolume.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {compensatingControls.maxDailyVolume.enabled && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">$</span>
+                      <input
+                        type="number"
+                        value={compensatingControls.maxDailyVolume.value}
+                        onChange={e => setCompensatingControls({ ...compensatingControls, maxDailyVolume: { ...compensatingControls.maxDailyVolume, value: parseInt(e.target.value) } })}
+                        className="w-40 px-3 py-1.5 border border-gray-300 rounded-lg text-right"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Limit Change Waiting Period */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">Waiting Period for Limit Changes</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, limitChangeWaitingPeriod: { ...compensatingControls.limitChangeWaitingPeriod, enabled: !compensatingControls.limitChangeWaitingPeriod.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.limitChangeWaitingPeriod.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.limitChangeWaitingPeriod.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {compensatingControls.limitChangeWaitingPeriod.enabled && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={compensatingControls.limitChangeWaitingPeriod.hours}
+                        onChange={e => setCompensatingControls({ ...compensatingControls, limitChangeWaitingPeriod: { ...compensatingControls.limitChangeWaitingPeriod, hours: parseInt(e.target.value) } })}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg"
+                      >
+                        <option value={24}>24 hours</option>
+                        <option value={48}>48 hours</option>
+                        <option value={72}>72 hours</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Min Approvers for High Value */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">Minimum Approvers for High Value</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, minApproversHighValue: { ...compensatingControls.minApproversHighValue, enabled: !compensatingControls.minApproversHighValue.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.minApproversHighValue.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.minApproversHighValue.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {compensatingControls.minApproversHighValue.enabled && (
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-500">Payments over $</span>
+                        <input
+                          type="number"
+                          value={compensatingControls.minApproversHighValue.threshold}
+                          onChange={e => setCompensatingControls({ ...compensatingControls, minApproversHighValue: { ...compensatingControls.minApproversHighValue, threshold: parseInt(e.target.value) } })}
+                          className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-right"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-500">require at least</span>
+                        <input
+                          type="number"
+                          min={2}
+                          max={10}
+                          value={compensatingControls.minApproversHighValue.minApprovers}
+                          onChange={e => setCompensatingControls({ ...compensatingControls, minApproversHighValue: { ...compensatingControls.minApproversHighValue, minApprovers: parseInt(e.target.value) } })}
+                          className="w-16 px-3 py-1.5 border border-gray-300 rounded-lg text-center"
+                        />
+                        <span className="text-sm text-gray-500">approvers</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Require MFA */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Fingerprint className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">Require MFA for Approvals</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, requireMfaForApprovals: { ...compensatingControls.requireMfaForApprovals, enabled: !compensatingControls.requireMfaForApprovals.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.requireMfaForApprovals.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.requireMfaForApprovals.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Different Department Approvers */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">Require Different-Department Approvers</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, requireDifferentDepartment: { ...compensatingControls.requireDifferentDepartment, enabled: !compensatingControls.requireDifferentDepartment.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.requireDifferentDepartment.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.requireDifferentDepartment.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {compensatingControls.requireDifferentDepartment.enabled && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-500">For payments over $</span>
+                      <input
+                        type="number"
+                        value={compensatingControls.requireDifferentDepartment.threshold}
+                        onChange={e => setCompensatingControls({ ...compensatingControls, requireDifferentDepartment: { ...compensatingControls.requireDifferentDepartment, threshold: parseInt(e.target.value) } })}
+                        className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-right"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* User Creation Waiting Period */}
+                <div className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <UserPlus className="w-5 h-5 text-gray-400" />
+                      <span className="font-medium text-gray-800">User Creation Waiting Period</span>
+                      <InfoTooltip text="New users cannot approve payments for X hours after creation" />
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, userCreationWaitingPeriod: { ...compensatingControls.userCreationWaitingPeriod, enabled: !compensatingControls.userCreationWaitingPeriod.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.userCreationWaitingPeriod.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.userCreationWaitingPeriod.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {compensatingControls.userCreationWaitingPeriod.enabled && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={compensatingControls.userCreationWaitingPeriod.hours}
+                        onChange={e => setCompensatingControls({ ...compensatingControls, userCreationWaitingPeriod: { ...compensatingControls.userCreationWaitingPeriod, hours: parseInt(e.target.value) } })}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg"
+                      >
+                        <option value={24}>24 hours</option>
+                        <option value={48}>48 hours</option>
+                        <option value={72}>72 hours</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Super Admin Change Notification */}
+                <div className="p-4 border border-gray-200 rounded-lg bg-amber-50 border-amber-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-5 h-5 text-amber-600" />
+                      <span className="font-medium text-gray-800">Super Admin Change Notification</span>
+                      <span className="text-xs px-2 py-0.5 bg-amber-200 text-amber-800 rounded-full">Recommended</span>
+                    </div>
+                    <button
+                      onClick={() => setCompensatingControls({ ...compensatingControls, superAdminChangeNotification: { ...compensatingControls.superAdminChangeNotification, enabled: !compensatingControls.superAdminChangeNotification.enabled } })}
+                      className={`w-10 h-6 rounded-full transition-colors ${compensatingControls.superAdminChangeNotification.enabled ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${compensatingControls.superAdminChangeNotification.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">Payfinia receives alerts when Super Admin roster changes</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-semibold text-gray-800">Initial Super Admins</h3>
+                <p className="text-sm text-gray-500">Create exactly 2 Super Admins who will manage this FI</p>
+              </div>
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-blue-800">
+                    <p className="font-medium">Dual Super Admin Requirement</p>
+                    <p>All control changes made by Super Admins require approval from a second Super Admin. If an FI ever drops to 1 Super Admin, Payfinia must be contacted to add another.</p>
+                  </div>
+                </div>
+              </div>
+
+              {superAdmins.map((admin, index) => (
+                <div key={index} className="p-4 border border-gray-200 rounded-lg">
+                  <h4 className="font-medium text-gray-700 mb-3">Super Admin {index + 1} *</h4>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                      <input
+                        type="text"
+                        value={admin.name}
+                        onChange={e => {
+                          const updated = [...superAdmins];
+                          updated[index].name = e.target.value;
+                          setSuperAdmins(updated);
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={admin.email}
+                        onChange={e => {
+                          const updated = [...superAdmins];
+                          updated[index].email = e.target.value;
+                          setSuperAdmins(updated);
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                      <input
+                        type="tel"
+                        value={admin.phone}
+                        onChange={e => {
+                          const updated = [...superAdmins];
+                          updated[index].phone = e.target.value;
+                          setSuperAdmins(updated);
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 border-t border-gray-200 flex justify-between">
+          <button
+            onClick={() => step > 1 ? setStep(step - 1) : onClose()}
+            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+          >
+            {step === 1 ? 'Cancel' : 'Back'}
+          </button>
+          <button
+            onClick={() => step < 3 ? setStep(step + 1) : handleCreate()}
+            disabled={(step === 1 && !isStep1Valid) || (step === 3 && !isStep3Valid)}
+            className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {step < 3 ? (
+              <>Next <ArrowRight className="w-4 h-4" /></>
+            ) : (
+              <>Create Organization <CheckCircle className="w-4 h-4" /></>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// FI Detail Modal (Read-only view for Payfinia)
+function FIDetailModal({ fi, onClose }) {
+  const [activeTab, setActiveTab] = useState('overview');
+  
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'users', label: 'Users & Roles' },
+    { id: 'controls', label: 'Controls' },
+    { id: 'payments', label: 'Payments' },
+    { id: 'audit', label: 'Audit Log' },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+      <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl mx-4 max-h-[90vh] flex flex-col">
+        <div className="p-6 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
+                <Building className="w-6 h-6 text-indigo-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-gray-800">{fi.name}</h2>
+                <p className="text-sm text-gray-500 font-mono">{fi.id}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium flex items-center gap-2">
+                <Eye className="w-4 h-4" /> Read Only
+              </span>
+              <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+                <XCircle className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex gap-1 mt-4 border-b border-gray-200 -mb-6 -mx-6 px-6">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-6 flex-1 overflow-y-auto">
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-500">Status</p>
+                  <div className="mt-1"><StatusBadge status={fi.status} size="md" /></div>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-500">Super Admins</p>
+                  <p className="text-2xl font-bold text-gray-800">{fi.superAdminCount || 0}</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-500">Created</p>
+                  <p className="font-medium text-gray-800">{new Date(fi.createdAt).toLocaleDateString()}</p>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-semibold text-gray-800 mb-3">Compensating Controls</h3>
+                <div className="space-y-2">
+                  {Object.entries(fi.compensatingControls || {}).map(([key, value]) => (
+                    <div key={key} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <span className="text-sm text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</span>
+                      <span className={`text-sm font-medium ${value.enabled ? 'text-green-600' : 'text-gray-400'}`}>
+                        {value.enabled ? (value.value ? `$${value.value.toLocaleString()}` : value.hours ? `${value.hours}h` : 'Enabled') : 'Disabled'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab !== 'overview' && (
+            <EmptyState
+              icon={Eye}
+              title={`${tabs.find(t => t.id === activeTab)?.label} View`}
+              description="Read-only view of FI data. Payfinia admins can view but not modify FI configurations."
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Payfinia Notifications
+function PayfiniaNotifications({ notifications, setNotifications }) {
+  if (notifications.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+        <EmptyState
+          icon={Bell}
+          title="No notifications"
+          description="You'll receive alerts here when FIs make Super Admin changes or other important events occur."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm divide-y divide-gray-100">
+      {notifications.map(notif => (
+        <div key={notif.id} className={`p-4 ${!notif.read ? 'bg-indigo-50/50' : ''}`}>
+          <div className="flex items-start gap-3">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+              notif.type === 'warning' ? 'bg-amber-100' : notif.type === 'alert' ? 'bg-red-100' : 'bg-blue-100'
+            }`}>
+              {notif.type === 'warning' ? <AlertTriangle className="w-5 h-5 text-amber-600" /> :
+               notif.type === 'alert' ? <AlertOctagon className="w-5 h-5 text-red-600" /> :
+               <Info className="w-5 h-5 text-blue-600" />}
+            </div>
+            <div className="flex-1">
+              <p className="font-medium text-gray-800">{notif.title}</p>
+              <p className="text-sm text-gray-600">{notif.message}</p>
+              <p className="text-xs text-gray-400 mt-1">{notif.timestamp}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Platform Audit Log
+function PlatformAuditLog() {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <EmptyState
+        icon={ClipboardList}
+        title="Platform Audit Log"
+        description="All Payfinia admin actions and FI activities are logged here for compliance and security review."
+      />
+    </div>
+  );
+}
+
+// ============================================================================
+// FI ADMIN PANEL (Integrated into main app)
+// ============================================================================
+
+export function FIAdminPanel({ currentUser, fiConfig }) {
+  const [activeTab, setActiveTab] = useState('users');
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [pendingChanges, setPendingChanges] = useState([]);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showCreateRole, setShowCreateRole] = useState(false);
+  const [showCreateDept, setShowCreateDept] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
+
+  const isSuperAdmin = currentUser?.isSuperAdmin;
+  const pendingCount = pendingChanges.filter(c => c.status === 'pending').length;
+
+  const tabs = [
+    { id: 'users', label: 'Users', icon: Users },
+    { id: 'roles', label: 'Roles', icon: ShieldCheck },
+    { id: 'departments', label: 'Departments', icon: Layers },
+    { id: 'pending', label: 'Pending Approvals', icon: Clock, badge: pendingCount },
+    { id: 'settings', label: 'FI Settings', icon: Settings },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <div className="flex gap-0">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                activeTab === tab.id
+                  ? 'border-blue-500 text-blue-600 bg-blue-50/50'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+              {tab.badge > 0 && (
+                <span className="px-2 py-0.5 text-xs font-semibold bg-amber-100 text-amber-700 rounded-full">
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      {activeTab === 'users' && (
+        <UsersManagement 
+          users={users}
+          setUsers={setUsers}
+          roles={roles}
+          departments={departments}
+          isSuperAdmin={isSuperAdmin}
+          onCreateUser={() => setShowCreateUser(true)}
+          pendingChanges={pendingChanges}
+          setPendingChanges={setPendingChanges}
+          currentUser={currentUser}
+        />
+      )}
+      {activeTab === 'roles' && (
+        <RolesManagement
+          roles={roles}
+          setRoles={setRoles}
+          isSuperAdmin={isSuperAdmin}
+          onCreateRole={() => setShowCreateRole(true)}
+          pendingChanges={pendingChanges}
+          setPendingChanges={setPendingChanges}
+          currentUser={currentUser}
+        />
+      )}
+      {activeTab === 'departments' && (
+        <DepartmentsManagement
+          departments={departments}
+          setDepartments={setDepartments}
+          isSuperAdmin={isSuperAdmin}
+          onCreateDept={() => setShowCreateDept(true)}
+        />
+      )}
+      {activeTab === 'pending' && (
+        <PendingApprovals
+          pendingChanges={pendingChanges}
+          setPendingChanges={setPendingChanges}
+          currentUser={currentUser}
+          isSuperAdmin={isSuperAdmin}
+        />
+      )}
+      {activeTab === 'settings' && (
+        <FISettings fiConfig={fiConfig} isSuperAdmin={isSuperAdmin} />
+      )}
+
+      {/* Modals */}
+      {showCreateUser && (
+        <CreateUserModal
+          roles={roles}
+          departments={departments}
+          onClose={() => setShowCreateUser(false)}
+          onCreate={(user) => {
+            // If Super Admin, needs dual approval
+            if (isSuperAdmin) {
+              setPendingChanges([...pendingChanges, {
+                id: `CHG-${Date.now()}`,
+                type: 'user_create',
+                requestedBy: currentUser.id,
+                requestedByName: currentUser.name,
+                requestedAt: new Date().toISOString(),
+                status: 'pending',
+                data: user,
+              }]);
+            } else {
+              setUsers([...users, { ...user, id: `USR-${Date.now()}`, status: 'active', createdAt: new Date().toISOString() }]);
+            }
+            setShowCreateUser(false);
+          }}
+          requiresApproval={isSuperAdmin}
+        />
+      )}
+      {showCreateRole && (
+        <CreateRoleModal
+          onClose={() => setShowCreateRole(false)}
+          onCreate={(role) => {
+            if (isSuperAdmin) {
+              setPendingChanges([...pendingChanges, {
+                id: `CHG-${Date.now()}`,
+                type: 'role_create',
+                requestedBy: currentUser.id,
+                requestedByName: currentUser.name,
+                requestedAt: new Date().toISOString(),
+                status: 'pending',
+                data: role,
+              }]);
+            } else {
+              setRoles([...roles, { ...role, id: `ROLE-${Date.now()}` }]);
+            }
+            setShowCreateRole(false);
+          }}
+          requiresApproval={isSuperAdmin}
+        />
+      )}
+      {showCreateDept && (
+        <CreateDepartmentModal
+          onClose={() => setShowCreateDept(false)}
+          onCreate={(dept) => {
+            setDepartments([...departments, { ...dept, id: `DEPT-${Date.now()}` }]);
+            setShowCreateDept(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Users Management
+function UsersManagement({ users, setUsers, roles, departments, isSuperAdmin, onCreateUser, pendingChanges, setPendingChanges, currentUser }) {
+  const [search, setSearch] = useState('');
+  
+  const filtered = users.filter(u => 
+    u.name.toLowerCase().includes(search.toLowerCase()) ||
+    u.email.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search users..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <button onClick={onCreateUser} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <UserPlus className="w-4 h-4" />
+          Add User
+        </button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <EmptyState
+            icon={Users}
+            title="No users yet"
+            description="Add users to your organization and assign them roles to control what they can access."
+            action={
+              <button onClick={onCreateUser} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <UserPlus className="w-4 h-4" />
+                Add User
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filtered.map(user => (
+                <tr key={user.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center">
+                        <span className="text-sm font-medium text-blue-600">
+                          {user.name.split(' ').map(n => n[0]).join('')}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-800">{user.name}</p>
+                        <p className="text-xs text-gray-500">{user.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                      user.isSuperAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {user.roleName || 'No Role'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{user.department || '—'}</td>
+                  <td className="px-4 py-3"><StatusBadge status={user.status} /></td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                        <UserX className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Roles Management
+function RolesManagement({ roles, setRoles, isSuperAdmin, onCreateRole, pendingChanges, setPendingChanges, currentUser }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">Define roles with specific permissions and approval limits</p>
+        <button onClick={onCreateRole} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <Plus className="w-4 h-4" />
+          Create Role
+        </button>
+      </div>
+
+      {roles.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <EmptyState
+            icon={ShieldCheck}
+            title="No custom roles yet"
+            description="Create roles to define what users can do. Each role has specific permissions and approval limits."
+            action={
+              <button onClick={onCreateRole} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <Plus className="w-4 h-4" />
+                Create Role
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {roles.map(role => (
+            <div key={role.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                    role.isSuperAdmin ? 'bg-purple-100' : 'bg-blue-100'
+                  }`}>
+                    <ShieldCheck className={`w-5 h-5 ${role.isSuperAdmin ? 'text-purple-600' : 'text-blue-600'}`} />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">{role.name}</h3>
+                    <p className="text-xs text-gray-500">{role.permissions?.length || 0} permissions</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  {!role.isSystemRole && (
+                    <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {role.approvalLimit && (
+                <p className="text-sm text-gray-600">
+                  Approval limit: <span className="font-medium">${role.approvalLimit.toLocaleString()}</span>
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Departments Management
+function DepartmentsManagement({ departments, setDepartments, isSuperAdmin, onCreateDept }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">Organize users by department for approval routing</p>
+        <button onClick={onCreateDept} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <Plus className="w-4 h-4" />
+          Add Department
+        </button>
+      </div>
+
+      {departments.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <EmptyState
+            icon={Layers}
+            title="No departments yet"
+            description="Create departments to organize users and enable different-department approval requirements."
+            action={
+              <button onClick={onCreateDept} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <Plus className="w-4 h-4" />
+                Add Department
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Users</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {departments.map(dept => (
+                <tr key={dept.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium text-gray-800">{dept.name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{dept.userCount || 0}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Pending Approvals (for dual Super Admin approval)
+function PendingApprovals({ pendingChanges, setPendingChanges, currentUser, isSuperAdmin }) {
+  const pending = pendingChanges.filter(c => c.status === 'pending');
+  
+  const handleApprove = (changeId) => {
+    setPendingChanges(pendingChanges.map(c => 
+      c.id === changeId ? { ...c, status: 'approved', approvedBy: currentUser.id, approvedAt: new Date().toISOString() } : c
+    ));
+  };
+
+  const handleReject = (changeId) => {
+    setPendingChanges(pendingChanges.map(c => 
+      c.id === changeId ? { ...c, status: 'rejected', rejectedBy: currentUser.id, rejectedAt: new Date().toISOString() } : c
+    ));
+  };
+
+  const getChangeTypeLabel = (type) => {
+    const labels = {
+      user_create: 'New User',
+      user_edit: 'User Change',
+      role_create: 'New Role',
+      role_edit: 'Role Change',
+      control_change: 'Control Change',
+    };
+    return labels[type] || type;
+  };
+
+  return (
+    <div className="space-y-4">
+      {!isSuperAdmin && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">Only Super Admins can approve pending changes.</p>
+        </div>
+      )}
+
+      {pending.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <EmptyState
+            icon={CheckCircle}
+            title="No pending approvals"
+            description="All admin changes have been processed. Changes requiring dual Super Admin approval will appear here."
+          />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {pending.map(change => (
+            <div key={change.id} className="bg-white rounded-xl border border-amber-200 shadow-sm p-5">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                    <Clock className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">
+                        {getChangeTypeLabel(change.type)}
+                      </span>
+                      <span className="text-sm text-gray-500">
+                        Requested by {change.requestedByName}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700 mb-2">
+                      {change.type === 'user_create' && `Create user: ${change.data?.name} (${change.data?.email})`}
+                      {change.type === 'role_create' && `Create role: ${change.data?.name}`}
+                      {change.type === 'control_change' && `Modify control: ${change.data?.controlName}`}
+                    </p>
+                    <p className="text-xs text-gray-400">{new Date(change.requestedAt).toLocaleString()}</p>
+                  </div>
+                </div>
+                
+                {isSuperAdmin && change.requestedBy !== currentUser.id && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleReject(change.id)}
+                      className="px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 text-sm"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      onClick={() => handleApprove(change.id)}
+                      className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                    >
+                      Approve
+                    </button>
+                  </div>
+                )}
+                
+                {change.requestedBy === currentUser.id && (
+                  <span className="text-xs text-gray-400 italic">Awaiting other Super Admin</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// FI Settings
+function FISettings({ fiConfig, isSuperAdmin }) {
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+        <h3 className="font-semibold text-gray-800 mb-4">Organization Settings</h3>
+        
+        <div className="space-y-4">
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-gray-800">Require Maker ≠ Checker</p>
+                <p className="text-sm text-gray-500">Prevent users from approving their own payments</p>
+              </div>
+              <button className="w-10 h-6 bg-blue-600 rounded-full">
+                <div className="w-4 h-4 bg-white rounded-full translate-x-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+        <h3 className="font-semibold text-gray-800 mb-2">Compensating Controls</h3>
+        <p className="text-sm text-gray-500 mb-4">These are set by Payfinia and cannot be modified</p>
+        
+        <div className="space-y-2">
+          <div className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
+            <span className="text-sm text-gray-700">Max Single Transaction</span>
+            <span className="text-sm font-medium text-gray-800">$1,000,000</span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg flex items-center justify-between">
+            <span className="text-sm text-gray-700">Max Daily Volume</span>
+            <span className="text-sm font-medium text-gray-800">$10,000,000</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Create User Modal
+function CreateUserModal({ roles, departments, onClose, onCreate, requiresApproval }) {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    roleId: '',
+    roleName: '',
+    department: '',
+    isSuperAdmin: false,
+  });
+
+  const handleSubmit = () => {
+    onCreate(formData);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">Add User</h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {requiresApproval && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Requires approval from another Super Admin
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={e => setFormData({ ...formData, email: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+            <select
+              value={formData.roleId}
+              onChange={e => {
+                const role = roles.find(r => r.id === e.target.value);
+                setFormData({ ...formData, roleId: e.target.value, roleName: role?.name || '' });
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select a role</option>
+              {roles.map(role => (
+                <option key={role.id} value={role.id}>{role.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {departments.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+              <select
+                value={formData.department}
+                onChange={e => setFormData({ ...formData, department: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select a department</option>
+                {departments.map(dept => (
+                  <option key={dept.id} value={dept.name}>{dept.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!formData.name || !formData.email || !formData.roleId}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {requiresApproval ? 'Submit for Approval' : 'Add User'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Create Role Modal
+function CreateRoleModal({ onClose, onCreate, requiresApproval }) {
+  const [formData, setFormData] = useState({
+    name: '',
+    permissions: [],
+    approvalLimit: '',
+    isSuperAdmin: false,
+  });
+
+  const togglePermission = (permId) => {
+    setFormData({
+      ...formData,
+      permissions: formData.permissions.includes(permId)
+        ? formData.permissions.filter(p => p !== permId)
+        : [...formData.permissions, permId]
+    });
+  };
+
+  const handleSubmit = () => {
+    onCreate({
+      ...formData,
+      approvalLimit: formData.approvalLimit ? parseInt(formData.approvalLimit) : null,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl mx-4">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">Create Role</h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+          {requiresApproval && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Requires approval from another Super Admin
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role Name *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              placeholder="e.g., Treasury Manager"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Approval Limit</label>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">$</span>
+              <input
+                type="number"
+                value={formData.approvalLimit}
+                onChange={e => setFormData({ ...formData, approvalLimit: e.target.value })}
+                placeholder="Leave empty for no approval rights"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">Permissions</label>
+            <div className="space-y-4">
+              {PERMISSION_CATEGORIES.map(category => {
+                const categoryPerms = Object.entries(PERMISSION_DEFINITIONS).filter(([, def]) => def.category === category);
+                if (categoryPerms.length === 0) return null;
+                
+                return (
+                  <div key={category}>
+                    <p className="text-xs font-medium text-gray-500 uppercase mb-2">{category}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {categoryPerms.map(([permId, def]) => (
+                        <label key={permId} className="flex items-center gap-2 p-2 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.permissions.includes(permId)}
+                            onChange={() => togglePermission(permId)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-gray-700">{def.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!formData.name}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {requiresApproval ? 'Submit for Approval' : 'Create Role'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Create Department Modal
+function CreateDepartmentModal({ onClose, onCreate }) {
+  const [name, setName] = useState('');
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">Add Department</h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Department Name *</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="e.g., Treasury, Operations, Finance"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => onCreate({ name })}
+            disabled={!name}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            Add Department
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// DEFAULT EXPORT - Combined App with Console Switcher
+// ============================================================================
+
+export default function AdminApp() {
+  const [mode, setMode] = useState('fi'); // 'payfinia' or 'fi'
+  const [currentUser] = useState({
+    id: 'USR-001',
+    name: 'Jane Smith',
+    email: 'jsmith@fnb.com',
+    isSuperAdmin: true,
+  });
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      {/* Mode Switcher (for demo purposes) */}
+      <div className="fixed bottom-4 right-4 z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex gap-2">
+        <button
+          onClick={() => setMode('fi')}
+          className={`px-3 py-1.5 rounded text-sm font-medium ${mode === 'fi' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          FI Admin
+        </button>
+        <button
+          onClick={() => setMode('payfinia')}
+          className={`px-3 py-1.5 rounded text-sm font-medium ${mode === 'payfinia' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          Payfinia Admin
+        </button>
+      </div>
+
+      {mode === 'payfinia' ? (
+        <PayfiniaAdminConsole />
+      ) : (
+        <div className="min-h-screen bg-gray-50 p-6">
+          <div className="max-w-6xl mx-auto">
+            <div className="mb-6">
+              <h1 className="text-2xl font-bold text-gray-800">FI Administration</h1>
+              <p className="text-gray-500">Manage users, roles, and organization settings</p>
+            </div>
+            <FIAdminPanel currentUser={currentUser} fiConfig={{}} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
