@@ -1370,573 +1370,793 @@ function TemplateModal({ template, onClose, onSave }) {
   );
 }
 
-// Controls Panel - Modern Matrix View
+// Controls Panel - Comprehensive Design with Instruction Types
 function ControlsPanel({ users, roles, onAuditLog }) {
-  const [activeView, setActiveView] = useState('limits');
-  const [editingCell, setEditingCell] = useState(null);
-  const [localUsers, setLocalUsers] = useState(users || SAMPLE_USERS);
-  const [localRoles, setLocalRoles] = useState(roles || SAMPLE_ROLES);
+  const [activeSection, setActiveSection] = useState('limits');
+  const [perTypeEnabled, setPerTypeEnabled] = useState(true);
   
-  // FI-Level Controls (read-only, set by Payfinia)
-  const [fiControls] = useState({
-    maxSinglePayment: 1000000,
-    maxDailyVolume: 10000000,
-    minApproversOver250k: 2,
-    minApproversOver500k: 3,
-    requireMfa: true,
-    differentDepartmentOver250k: true,
-  });
-
-  // Operational Controls (editable by Super Admin)
-  const [operationalControls, setOperationalControls] = useState({
-    operatingHoursStart: '08:00',
-    operatingHoursEnd: '18:00',
-    allowWeekendPayments: false,
-    allowHolidayPayments: false,
-    pendingExpirationHours: 24,
-    duplicateCooldownMinutes: 5,
-    maxPaymentsPerHour: 20,
-    maxPaymentsPerDay: 100,
-    makerCheckerEnabled: true,
-  });
-
-  const handleRoleLimitChange = (roleId, field, value) => {
-    const numValue = value === '' ? null : parseInt(value);
-    setLocalRoles(localRoles.map(r => 
-      r.id === roleId ? { ...r, [field]: numValue } : r
-    ));
-    const role = localRoles.find(r => r.id === roleId);
-    onAuditLog?.('Role Limit Changed', 'config', `Updated ${role?.name} ${field} to ${numValue ? '$' + numValue.toLocaleString() : 'Unlimited'}`, { roleId, field, value: numValue });
-    setEditingCell(null);
-  };
-
-  const handleUserLimitChange = (userId, field, value) => {
-    const numValue = value === '' ? null : parseInt(value);
-    setLocalUsers(localUsers.map(u => 
-      u.id === userId ? { ...u, [field]: numValue } : u
-    ));
-    const user = localUsers.find(u => u.id === userId);
-    onAuditLog?.('User Limit Changed', 'config', `Updated ${user?.name} ${field} to ${numValue ? '$' + numValue.toLocaleString() : 'Use Role Default'}`, { userId, field, value: numValue });
-    setEditingCell(null);
-  };
-
-  const handleOperationalChange = (key, value) => {
-    const oldValue = operationalControls[key];
-    setOperationalControls({ ...operationalControls, [key]: value });
-    onAuditLog?.('Control Changed', 'config', `Updated ${key} from ${oldValue} to ${value}`, { control: key, oldValue, newValue: value });
-  };
-
-  const formatLimit = (limit) => {
-    if (limit === null || limit === undefined) return '∞';
-    return '$' + limit.toLocaleString();
-  };
-
-  const views = [
-    { id: 'limits', label: 'Limits Matrix', icon: DollarSign },
-    { id: 'users', label: 'User Limits', icon: Users },
-    { id: 'operational', label: 'Operational', icon: Settings },
-    { id: 'fi', label: 'FI Limits', icon: Building2 },
+  // Instruction types
+  const instructionTypes = [
+    { id: 'bank', label: 'Bank-Init.', icon: Building2, color: 'blue', borderColor: 'border-blue-400', bgColor: 'bg-blue-50', headerBg: 'bg-blue-500' },
+    { id: 'commercial', label: 'Commercial', icon: Hash, color: 'green', borderColor: 'border-green-400', bgColor: 'bg-green-50', headerBg: 'bg-green-500' },
+    { id: 'individual', label: 'Individual', icon: Users, color: 'purple', borderColor: 'border-purple-400', bgColor: 'bg-purple-50', headerBg: 'bg-purple-500' },
   ];
+
+  // Transaction Limits State
+  const [txnLimits, setTxnLimits] = useState({
+    bank: { maxSingle: 500000, daily: 1000000, weekly: 5000000, monthly: 20000000 },
+    commercial: { maxSingle: 250000, daily: 500000, weekly: 2000000, monthly: 8000000 },
+    individual: { maxSingle: 100000, daily: 250000, weekly: 1000000, monthly: 4000000 },
+  });
+
+  // Velocity Limits State
+  const [velocityLimits, setVelocityLimits] = useState({
+    bank: { maxTxnHour: 10, maxTxnDay: 50, maxSameRecipient: 3, alertPercent: 80 },
+    commercial: { maxTxnHour: 20, maxTxnDay: 100, maxSameRecipient: 5, alertPercent: 80 },
+    individual: { maxTxnHour: 30, maxTxnDay: 150, maxSameRecipient: 5, alertPercent: 75 },
+  });
+
+  // Sender Account Velocity
+  const [senderVelocity, setSenderVelocity] = useState({
+    bank: { maxTxnHour: 8, maxTxnDay: 40, maxDailyAmount: 500000 },
+    commercial: { maxTxnHour: 10, maxTxnDay: 50, maxDailyAmount: 250000 },
+    individual: { maxTxnHour: 5, maxTxnDay: 25, maxDailyAmount: 100000 },
+  });
+
+  // Approval Thresholds State
+  const [approvalTiers, setApprovalTiers] = useState({
+    bank: [
+      { min: 0, max: 10000, approvers: 0, label: 'Auto' },
+      { min: 10000, max: 50000, approvers: 1 },
+      { min: 50000, max: 250000, approvers: 2 },
+      { min: 250000, max: null, approvers: 3 },
+    ],
+    commercial: [
+      { min: 0, max: 5000, approvers: 1 },
+      { min: 5000, max: 50000, approvers: 2 },
+      { min: 50000, max: null, approvers: 3 },
+    ],
+    individual: [
+      { min: 0, max: 2500, approvers: 1 },
+      { min: 2500, max: 25000, approvers: 2 },
+      { min: 25000, max: null, approvers: 3 },
+    ],
+  });
+
+  // Verification Requirements
+  const [verification, setVerification] = useState({
+    bank: { sightMax: 50000, amountMax: 250000, newBeneficiary: ['fullDetails', 'secondaryApprover'] },
+    commercial: { sightMax: 25000, amountMax: 100000, newBeneficiary: ['fullDetails', 'secondaryApprover', 'managerOverride'] },
+    individual: { sightMax: 10000, amountMax: 50000, newBeneficiary: ['fullDetails', 'secondaryApprover', 'managerOverride'] },
+  });
+
+  // Role Permissions State
+  const [rolePermissions, setRolePermissions] = useState({
+    bank: {
+      'Analyst': { init: true, appr: false, edit: false, canc: false, tpl: false, ctrl: false },
+      'Sr. Analyst': { init: true, appr: true, edit: false, canc: false, tpl: true, ctrl: false },
+      'Manager': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: false },
+      'Director': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: false },
+      'CFO': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: true },
+    },
+    commercial: {
+      'Analyst': { init: true, appr: false, edit: false, canc: false, tpl: false, ctrl: false },
+      'Sr. Analyst': { init: true, appr: true, edit: false, canc: true, tpl: false, ctrl: false },
+      'Manager': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: false },
+      'Director': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: false },
+      'CFO': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: true },
+    },
+    individual: {
+      'Analyst': { init: true, appr: false, edit: false, canc: false, tpl: false, ctrl: false },
+      'Sr. Analyst': { init: true, appr: false, edit: false, canc: false, tpl: true, ctrl: false },
+      'Manager': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: false },
+      'Director': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: true },
+      'CFO': { init: true, appr: true, edit: true, canc: true, tpl: true, ctrl: true },
+    },
+  });
+
+  // Per-Role Initiation Limits
+  const [roleLimits, setRoleLimits] = useState({
+    bank: {
+      'Analyst': { maxSingle: 50000, daily: 200000, enabled: true },
+      'Sr. Analyst': { maxSingle: 250000, daily: 750000, enabled: true },
+      'Manager': { maxSingle: null, daily: null, enabled: false },
+      'Director': { maxSingle: null, daily: null, enabled: false },
+      'CFO': { maxSingle: null, daily: null, enabled: false },
+    },
+    commercial: {
+      'Analyst': { maxSingle: 25000, daily: 100000, enabled: true },
+      'Sr. Analyst': { maxSingle: 100000, daily: 300000, enabled: true },
+      'Manager': { maxSingle: null, daily: null, enabled: false },
+      'Director': { maxSingle: null, daily: null, enabled: false },
+      'CFO': { maxSingle: null, daily: null, enabled: false },
+    },
+    individual: {
+      'Analyst': { maxSingle: 10000, daily: 50000, enabled: true },
+      'Sr. Analyst': { maxSingle: 50000, daily: 150000, enabled: true },
+      'Manager': { maxSingle: null, daily: null, enabled: false },
+      'Director': { maxSingle: null, daily: null, enabled: false },
+      'CFO': { maxSingle: null, daily: null, enabled: false },
+    },
+  });
+
+  // Scheduling State
+  const [operatingWindows, setOperatingWindows] = useState({
+    bank: { fednow: { start: '06:00', end: '22:00', enabled: true }, rtp: { start: '00:00', end: '23:59', enabled: true } },
+    commercial: { fednow: { start: '08:00', end: '18:00', enabled: true }, rtp: { start: '06:00', end: '22:00', enabled: true } },
+    individual: { fednow: { start: '08:00', end: '20:00', enabled: true }, rtp: { start: '06:00', end: '22:00', enabled: true } },
+  });
+
+  const [roleTimeRestrictions, setRoleTimeRestrictions] = useState({
+    bank: {
+      'Analyst': { start: '08:00', end: '18:00', usesGlobal: false },
+      'Sr. Analyst': { start: '08:00', end: '18:00', usesGlobal: false },
+      'Manager': { usesGlobal: true },
+      'Director': { usesGlobal: true },
+    },
+    commercial: {
+      'Analyst': { start: '09:00', end: '17:00', usesGlobal: false },
+      'Sr. Analyst': { start: '09:00', end: '17:00', usesGlobal: false },
+      'Manager': { usesGlobal: true },
+      'Director': { usesGlobal: true },
+    },
+    individual: {
+      'Analyst': { start: '09:00', end: '17:00', usesGlobal: false },
+      'Sr. Analyst': { start: '09:00', end: '17:00', usesGlobal: false },
+      'Manager': { usesGlobal: true },
+      'Director': { usesGlobal: true },
+    },
+  });
+
+  const sections = [
+    { id: 'limits', label: 'Transaction Limits', icon: DollarSign },
+    { id: 'approval', label: 'Approval Workflow', icon: CheckCircle },
+    { id: 'roles', label: 'Roles & Permissions', icon: Users },
+    { id: 'scheduling', label: 'Scheduling', icon: Calendar },
+  ];
+
+  const handleLimitChange = (type, category, field, value) => {
+    const numValue = value === '' ? null : parseInt(value.toString().replace(/,/g, ''));
+    if (category === 'txn') {
+      setTxnLimits({ ...txnLimits, [type]: { ...txnLimits[type], [field]: numValue } });
+    } else if (category === 'velocity') {
+      setVelocityLimits({ ...velocityLimits, [type]: { ...velocityLimits[type], [field]: numValue } });
+    } else if (category === 'sender') {
+      setSenderVelocity({ ...senderVelocity, [type]: { ...senderVelocity[type], [field]: numValue } });
+    }
+    onAuditLog?.('Limit Changed', 'config', `Updated ${type} ${field} to ${numValue?.toLocaleString() || 'unlimited'}`, { type, field, value: numValue });
+  };
+
+  const formatAmount = (val) => val ? `$${val.toLocaleString()}` : '—';
+  const formatK = (val) => {
+    if (!val) return '∞';
+    if (val >= 1000000) return `$${(val/1000000).toFixed(1)}M`;
+    if (val >= 1000) return `$${(val/1000)}K`;
+    return `$${val}`;
+  };
+
+  // Render input field with $ prefix
+  const renderAmountInput = (value, onChange, placeholder = '') => (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+      <input
+        type="text"
+        value={value?.toLocaleString() || ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+      />
+    </div>
+  );
+
+  const renderNumberInput = (value, onChange) => (
+    <input
+      type="number"
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+    />
+  );
+
+  // Card wrapper for instruction type
+  const TypeCard = ({ type, children }) => {
+    const config = instructionTypes.find(t => t.id === type);
+    return (
+      <div className={`rounded-xl border-2 ${config.borderColor} overflow-hidden`}>
+        <div className={`${config.headerBg} px-4 py-2 flex items-center gap-2`}>
+          <config.icon className="w-4 h-4 text-white" />
+          <span className="text-white font-medium text-sm">{config.label}</span>
+        </div>
+        <div className="p-4 bg-white">
+          {children}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
-      {/* View Tabs */}
-      <div className="flex items-center gap-2 p-1 bg-gray-100 rounded-xl w-fit">
-        {views.map(view => (
-          <button
-            key={view.id}
-            onClick={() => setActiveView(view.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeView === view.id 
-                ? 'bg-white text-gray-800 shadow-sm' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <view.icon className="w-4 h-4" />
-            {view.label}
-          </button>
-        ))}
+      {/* Header with Per-Type Toggle */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+            <Shield className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-800">Instruction-Type Controls</h3>
+            <p className="text-sm text-gray-500">Configure separate limits for Bank-Initiated, Commercial, and Individual payments.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-6">
+          {/* Type Pills */}
+          <div className="flex items-center gap-2">
+            {instructionTypes.map(type => (
+              <span key={type.id} className={`px-3 py-1 rounded-full text-xs font-medium border ${
+                type.id === 'bank' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                type.id === 'commercial' ? 'bg-green-50 text-green-700 border-green-200' :
+                'bg-purple-50 text-purple-700 border-purple-200'
+              }`}>
+                <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                  type.id === 'bank' ? 'bg-blue-500' :
+                  type.id === 'commercial' ? 'bg-green-500' : 'bg-purple-500'
+                }`}></span>
+                {type.label}
+              </span>
+            ))}
+          </div>
+          <span className="text-sm text-gray-400">Side-by-side comparison across all tabs</span>
+          {/* Per-Type Toggle */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-600">Per-Type</span>
+            <button
+              onClick={() => setPerTypeEnabled(!perTypeEnabled)}
+              className={`w-12 h-6 rounded-full transition-colors ${perTypeEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}
+            >
+              <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${perTypeEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Limits Matrix View */}
-      {activeView === 'limits' && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-            <h3 className="font-semibold text-gray-800">Role-Based Limits Matrix</h3>
-            <p className="text-sm text-gray-500 mt-1">Set initiation and approval limits for each role. Users inherit role limits unless overridden.</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-48">Role</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    <div className="flex flex-col items-center">
-                      <span>Initiation Limit</span>
-                      <span className="text-[10px] font-normal text-gray-400 normal-case">Max payment they can create</span>
-                    </div>
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    <div className="flex flex-col items-center">
-                      <span>Approval Limit</span>
-                      <span className="text-[10px] font-normal text-gray-400 normal-case">Max payment they can approve</span>
-                    </div>
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">Users</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {localRoles.map(role => {
-                  const roleUsers = localUsers.filter(u => u.roleId === role.id && u.status === 'active');
-                  return (
-                    <tr key={role.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                            role.isSuperAdmin ? 'bg-purple-100' : 'bg-blue-100'
-                          }`}>
-                            {role.isSuperAdmin ? (
-                              <ShieldCheck className="w-5 h-5 text-purple-600" />
-                            ) : (
-                              <Briefcase className="w-5 h-5 text-blue-600" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-800">{role.name}</p>
-                            <p className="text-xs text-gray-500">{role.description}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex justify-center">
-                          {editingCell === `${role.id}-initiation` ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-gray-500">$</span>
-                              <input
-                                type="number"
-                                defaultValue={role.initiationLimit || ''}
-                                placeholder="Unlimited"
-                                className="w-32 px-3 py-1.5 border border-blue-300 rounded-lg text-sm text-center focus:ring-2 focus:ring-blue-500"
-                                onBlur={(e) => handleRoleLimitChange(role.id, 'initiationLimit', e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleRoleLimitChange(role.id, 'initiationLimit', e.target.value)}
-                                autoFocus
-                              />
-                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
-                                <XCircle className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => !role.isSuperAdmin && setEditingCell(`${role.id}-initiation`)}
-                              disabled={role.isSuperAdmin}
-                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                role.isSuperAdmin 
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                  : role.initiationLimit 
-                                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' 
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              }`}
-                            >
-                              {formatLimit(role.initiationLimit)}
-                              {!role.isSuperAdmin && <Edit className="w-3 h-3 ml-2 inline opacity-50" />}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex justify-center">
-                          {editingCell === `${role.id}-approval` ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-gray-500">$</span>
-                              <input
-                                type="number"
-                                defaultValue={role.approvalLimit || ''}
-                                placeholder="Unlimited"
-                                className="w-32 px-3 py-1.5 border border-green-300 rounded-lg text-sm text-center focus:ring-2 focus:ring-green-500"
-                                onBlur={(e) => handleRoleLimitChange(role.id, 'approvalLimit', e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleRoleLimitChange(role.id, 'approvalLimit', e.target.value)}
-                                autoFocus
-                              />
-                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
-                                <XCircle className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => !role.isSuperAdmin && setEditingCell(`${role.id}-approval`)}
-                              disabled={role.isSuperAdmin}
-                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                role.isSuperAdmin 
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                  : role.approvalLimit 
-                                    ? 'bg-green-50 text-green-700 hover:bg-green-100' 
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                              }`}
-                            >
-                              {formatLimit(role.approvalLimit)}
-                              {!role.isSuperAdmin && <Edit className="w-3 h-3 ml-2 inline opacity-50" />}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <Users className="w-4 h-4 text-gray-400" />
-                          <span className="text-sm text-gray-600">{roleUsers.length}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      <div className="flex gap-6">
+        {/* Left Sidebar */}
+        <div className="w-56 space-y-1 flex-shrink-0">
+          {sections.map(section => (
+            <button
+              key={section.id}
+              onClick={() => setActiveSection(section.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${
+                activeSection === section.id 
+                  ? 'bg-blue-600 text-white shadow-lg' 
+                  : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <section.icon className="w-5 h-5" />
+              <span className="font-medium text-sm">{section.label}</span>
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* User Limits View */}
-      {activeView === 'users' && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-green-50 to-emerald-50">
-            <h3 className="font-semibold text-gray-800">Individual User Limits</h3>
-            <p className="text-sm text-gray-500 mt-1">Override role defaults for specific users. Empty = inherits from role.</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">User</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Role</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    <div className="flex flex-col items-center">
-                      <span>Initiation Limit</span>
-                      <span className="text-[10px] font-normal text-gray-400 normal-case">Role default shown in gray</span>
-                    </div>
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    <div className="flex flex-col items-center">
-                      <span>Approval Limit</span>
-                      <span className="text-[10px] font-normal text-gray-400 normal-case">Role default shown in gray</span>
-                    </div>
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Effective</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {localUsers.filter(u => u.status === 'active').map(user => {
-                  const role = localRoles.find(r => r.id === user.roleId);
-                  const effectiveInitiation = user.initiationLimit ?? role?.initiationLimit;
-                  const effectiveApproval = user.approvalLimit ?? role?.approvalLimit;
+        {/* Main Content */}
+        <div className="flex-1 space-y-8">
+          {/* Transaction Limits Section */}
+          {activeSection === 'limits' && (
+            <>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-1">Transaction Limits</h3>
+                <p className="text-sm text-gray-500 mb-6">Amount and velocity limits for each instruction type.</p>
+
+                {/* Global Amount Limits */}
+                <div className="mb-8">
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Global Amount Limits</h4>
+                  <p className="text-xs text-gray-400 mb-4">Maximum transaction amounts per period.</p>
                   
-                  return (
-                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium text-white ${
-                            user.isSuperAdmin ? 'bg-purple-500' : 'bg-blue-500'
-                          }`}>
-                            {user.name.split(' ').map(n => n[0]).join('')}
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Single Transaction</label>
+                            {renderAmountInput(txnLimits[type.id].maxSingle, (v) => handleLimitChange(type.id, 'txn', 'maxSingle', v))}
                           </div>
                           <div>
-                            <p className="font-medium text-gray-800">{user.name}</p>
-                            <p className="text-xs text-gray-500">{user.department}</p>
+                            <label className="block text-xs text-gray-500 mb-1">Daily Limit</label>
+                            {renderAmountInput(txnLimits[type.id].daily, (v) => handleLimitChange(type.id, 'txn', 'daily', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Weekly Limit</label>
+                            {renderAmountInput(txnLimits[type.id].weekly, (v) => handleLimitChange(type.id, 'txn', 'weekly', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Monthly Limit</label>
+                            {renderAmountInput(txnLimits[type.id].monthly, (v) => handleLimitChange(type.id, 'txn', 'monthly', v))}
                           </div>
                         </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          user.isSuperAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {user.roleName}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col items-center gap-1">
-                          {editingCell === `${user.id}-initiation` ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-gray-500">$</span>
-                              <input
-                                type="number"
-                                defaultValue={user.initiationLimit || ''}
-                                placeholder="Use role default"
-                                className="w-28 px-2 py-1 border border-blue-300 rounded text-sm text-center focus:ring-2 focus:ring-blue-500"
-                                onBlur={(e) => handleUserLimitChange(user.id, 'initiationLimit', e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleUserLimitChange(user.id, 'initiationLimit', e.target.value)}
-                                autoFocus
-                              />
-                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
-                                <XCircle className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => !user.isSuperAdmin && setEditingCell(`${user.id}-initiation`)}
-                              disabled={user.isSuperAdmin}
-                              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
-                                user.isSuperAdmin 
-                                  ? 'bg-gray-50 text-gray-400 cursor-not-allowed' 
-                                  : user.initiationLimit !== null && user.initiationLimit !== undefined
-                                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 ring-2 ring-blue-200' 
-                                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Global Velocity Limits */}
+                <div className="mb-8">
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Global Velocity Limits</h4>
+                  <p className="text-xs text-gray-400 mb-4">Maximum transaction counts per time period.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Transactions / Hour</label>
+                            {renderNumberInput(velocityLimits[type.id].maxTxnHour, (v) => handleLimitChange(type.id, 'velocity', 'maxTxnHour', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Transactions / Day</label>
+                            {renderNumberInput(velocityLimits[type.id].maxTxnDay, (v) => handleLimitChange(type.id, 'velocity', 'maxTxnDay', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Same-Recipient / Day</label>
+                            {renderNumberInput(velocityLimits[type.id].maxSameRecipient, (v) => handleLimitChange(type.id, 'velocity', 'maxSameRecipient', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Alert at % of Limit</label>
+                            {renderNumberInput(velocityLimits[type.id].alertPercent, (v) => handleLimitChange(type.id, 'velocity', 'alertPercent', v))}
+                          </div>
+                        </div>
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sender Account Velocity */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Sender Account Velocity</h4>
+                  <p className="text-xs text-gray-400 mb-4">Per-originating-account limits to prevent excessive outflows from a single source.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Txns / Hour (per sender)</label>
+                            {renderNumberInput(senderVelocity[type.id].maxTxnHour, (v) => handleLimitChange(type.id, 'sender', 'maxTxnHour', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Txns / Day (per sender)</label>
+                            {renderNumberInput(senderVelocity[type.id].maxTxnDay, (v) => handleLimitChange(type.id, 'sender', 'maxTxnDay', v))}
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Max Daily Amount (per sender)</label>
+                            {renderAmountInput(senderVelocity[type.id].maxDailyAmount, (v) => handleLimitChange(type.id, 'sender', 'maxDailyAmount', v))}
+                          </div>
+                        </div>
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Approval Workflow Section */}
+          {activeSection === 'approval' && (
+            <>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-1">Approval Workflow</h3>
+                <p className="text-sm text-gray-500 mb-6">Approval requirements and verification rules per instruction type.</p>
+
+                {/* Approval Thresholds */}
+                <div className="mb-8">
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Approval Thresholds</h4>
+                  <p className="text-xs text-gray-400 mb-4">Number of approvers required based on payment amount.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-2">
+                          {approvalTiers[type.id].map((tier, idx) => (
+                            <div 
+                              key={idx} 
+                              className={`flex items-center justify-between p-3 rounded-lg border ${
+                                tier.approvers === 0 ? 'bg-green-50 border-green-200' :
+                                tier.approvers === 1 ? 'bg-blue-50 border-blue-200' :
+                                tier.approvers === 2 ? 'bg-yellow-50 border-yellow-200' :
+                                'bg-red-50 border-red-200'
                               }`}
                             >
-                              {user.initiationLimit !== null && user.initiationLimit !== undefined 
-                                ? formatLimit(user.initiationLimit)
-                                : <span className="text-gray-400">{formatLimit(role?.initiationLimit)}</span>
-                              }
-                              {!user.isSuperAdmin && <Edit className="w-3 h-3 ml-1 inline opacity-40" />}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col items-center gap-1">
-                          {editingCell === `${user.id}-approval` ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-gray-500">$</span>
-                              <input
-                                type="number"
-                                defaultValue={user.approvalLimit || ''}
-                                placeholder="Use role default"
-                                className="w-28 px-2 py-1 border border-green-300 rounded text-sm text-center focus:ring-2 focus:ring-green-500"
-                                onBlur={(e) => handleUserLimitChange(user.id, 'approvalLimit', e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleUserLimitChange(user.id, 'approvalLimit', e.target.value)}
-                                autoFocus
-                              />
-                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
-                                <XCircle className="w-4 h-4" />
-                              </button>
+                              <span className="text-sm text-gray-700">
+                                {formatK(tier.min)} — {tier.max ? formatK(tier.max) : '∞'}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                  tier.approvers === 0 ? 'bg-green-200 text-green-800' :
+                                  tier.approvers === 1 ? 'bg-blue-200 text-blue-800' :
+                                  tier.approvers === 2 ? 'bg-yellow-200 text-yellow-800' :
+                                  'bg-red-200 text-red-800'
+                                }`}>
+                                  {tier.label || tier.approvers}
+                                </span>
+                                <Edit className="w-3 h-3 text-gray-400" />
+                              </div>
                             </div>
-                          ) : (
-                            <button
-                              onClick={() => !user.isSuperAdmin && setEditingCell(`${user.id}-approval`)}
-                              disabled={user.isSuperAdmin}
-                              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
-                                user.isSuperAdmin 
-                                  ? 'bg-gray-50 text-gray-400 cursor-not-allowed' 
-                                  : user.approvalLimit !== null && user.approvalLimit !== undefined
-                                    ? 'bg-green-50 text-green-700 hover:bg-green-100 ring-2 ring-green-200' 
-                                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
-                              }`}
-                            >
-                              {user.approvalLimit !== null && user.approvalLimit !== undefined 
-                                ? formatLimit(user.approvalLimit)
-                                : <span className="text-gray-400">{formatLimit(role?.approvalLimit)}</span>
-                              }
-                              {!user.isSuperAdmin && <Edit className="w-3 h-3 ml-1 inline opacity-40" />}
-                            </button>
-                          )}
+                          ))}
+                          <button className="w-full p-2 border-2 border-dashed border-gray-200 rounded-lg text-sm text-gray-400 hover:border-gray-300 hover:text-gray-500">
+                            + Add tier
+                          </button>
                         </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="text-center space-y-1">
-                          <div className="text-xs">
-                            <span className="text-gray-500">Init:</span>{' '}
-                            <span className="font-medium text-blue-600">{formatLimit(effectiveInitiation)}</span>
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Verification Requirements */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Verification Requirements</h4>
+                  <p className="text-xs text-gray-400 mb-4">What approvers must re-enter to verify transactions.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-4">
+                          {/* Sight Approval */}
+                          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-medium text-sm text-gray-700">Sight Approval</span>
+                              <span className="text-sm text-green-600 font-medium">≤ {formatK(verification[type.id].sightMax)}</span>
+                            </div>
+                            <p className="text-xs text-gray-500">Review and click approve.</p>
                           </div>
-                          <div className="text-xs">
-                            <span className="text-gray-500">Appr:</span>{' '}
-                            <span className="font-medium text-green-600">{formatLimit(effectiveApproval)}</span>
+                          
+                          {/* Amount Verify */}
+                          <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-sm text-gray-700">Amount Verify</span>
+                              <span className="text-sm text-yellow-600 font-medium">{formatK(verification[type.id].sightMax)}–{formatK(verification[type.id].amountMax)}</span>
+                            </div>
+                            <label className="flex items-center gap-2 text-xs text-gray-600">
+                              <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                              Re-enter amount
+                            </label>
+                          </div>
+                          
+                          {/* Full Verify */}
+                          <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-sm text-gray-700">Full Verify</span>
+                              <span className="text-sm text-red-600 font-medium">&gt; {formatK(verification[type.id].amountMax)}</span>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="flex items-center gap-2 text-xs text-gray-600">
+                                <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                                Amount
+                              </label>
+                              <label className="flex items-center gap-2 text-xs text-gray-600">
+                                <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                                Account number
+                              </label>
+                              <label className="flex items-center gap-2 text-xs text-gray-600">
+                                <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                                Recipient RTN
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* New Beneficiary */}
+                          <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
+                            <span className="font-medium text-sm text-gray-700 block mb-2">New Beneficiary</span>
+                            <div className="space-y-1">
+                              <label className="flex items-center gap-2 text-xs text-gray-600">
+                                <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                                Full details verification
+                              </label>
+                              <label className="flex items-center gap-2 text-xs text-gray-600">
+                                <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                                Secondary approver
+                              </label>
+                              {verification[type.id].newBeneficiary.includes('managerOverride') && (
+                                <label className="flex items-center gap-2 text-xs text-gray-600">
+                                  <input type="checkbox" checked readOnly className="rounded border-gray-300" />
+                                  Manager override
+                                </label>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
-      {/* Operational Controls View */}
-      {activeView === 'operational' && (
-        <div className="grid grid-cols-2 gap-6">
-          {/* Operating Hours */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50">
-              <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-amber-600" />
-                <h3 className="font-semibold text-gray-800">Operating Hours</h3>
-              </div>
-            </div>
-            <div className="p-4 space-y-4">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Start Time</p>
-                  <p className="text-xs text-gray-500">Payments allowed after</p>
-                </div>
-                <input
-                  type="time"
-                  value={operationalControls.operatingHoursStart}
-                  onChange={(e) => handleOperationalChange('operatingHoursStart', e.target.value)}
-                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                />
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">End Time</p>
-                  <p className="text-xs text-gray-500">Payments blocked after</p>
-                </div>
-                <input
-                  type="time"
-                  value={operationalControls.operatingHoursEnd}
-                  onChange={(e) => handleOperationalChange('operatingHoursEnd', e.target.value)}
-                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                />
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Weekend Payments</p>
-                  <p className="text-xs text-gray-500">Allow on Sat/Sun</p>
-                </div>
-                <button
-                  onClick={() => handleOperationalChange('allowWeekendPayments', !operationalControls.allowWeekendPayments)}
-                  className={`w-12 h-6 rounded-full transition-colors ${operationalControls.allowWeekendPayments ? 'bg-green-500' : 'bg-gray-300'}`}
-                >
-                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${operationalControls.allowWeekendPayments ? 'translate-x-6' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Holiday Payments</p>
-                  <p className="text-xs text-gray-500">Allow on bank holidays</p>
-                </div>
-                <button
-                  onClick={() => handleOperationalChange('allowHolidayPayments', !operationalControls.allowHolidayPayments)}
-                  className={`w-12 h-6 rounded-full transition-colors ${operationalControls.allowHolidayPayments ? 'bg-green-500' : 'bg-gray-300'}`}
-                >
-                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${operationalControls.allowHolidayPayments ? 'translate-x-6' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-            </div>
-          </div>
+          {/* Roles & Permissions Section */}
+          {activeSection === 'roles' && (
+            <>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-1">Roles & Permissions</h3>
+                <p className="text-sm text-gray-500 mb-6">What each role can do and their individual limits per instruction type.</p>
 
-          {/* Velocity Controls */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-violet-50 to-purple-50">
-              <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-violet-600" />
-                <h3 className="font-semibold text-gray-800">Velocity Controls</h3>
-              </div>
-            </div>
-            <div className="p-4 space-y-4">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Max Payments/Hour</p>
-                  <p className="text-xs text-gray-500">Per user limit</p>
+                {/* Role Permissions Matrix */}
+                <div className="mb-8">
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Role Permissions</h4>
+                  <p className="text-xs text-gray-400 mb-4">Actions each role can perform. Differences across types are highlighted.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-500">
+                              <th className="text-left py-1 font-medium">Role</th>
+                              <th className="text-center py-1 font-medium">Init</th>
+                              <th className="text-center py-1 font-medium">Appr</th>
+                              <th className="text-center py-1 font-medium">Edit</th>
+                              <th className="text-center py-1 font-medium">Canc</th>
+                              <th className="text-center py-1 font-medium">Tpl</th>
+                              <th className="text-center py-1 font-medium">Ctrl</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(rolePermissions[type.id]).map(([role, perms]) => (
+                              <tr key={role} className="border-t border-gray-100">
+                                <td className="py-2 font-medium text-gray-700">{role}</td>
+                                {['init', 'appr', 'edit', 'canc', 'tpl', 'ctrl'].map(perm => (
+                                  <td key={perm} className="text-center py-2">
+                                    <input 
+                                      type="checkbox" 
+                                      checked={perms[perm]} 
+                                      onChange={() => {
+                                        const newPerms = { ...rolePermissions };
+                                        newPerms[type.id][role][perm] = !perms[perm];
+                                        setRolePermissions(newPerms);
+                                        onAuditLog?.('Permission Changed', 'config', `${role} ${perm} set to ${!perms[perm]} for ${type.label}`, { role, perm, value: !perms[perm] });
+                                      }}
+                                      className="rounded border-gray-300 text-blue-600"
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </TypeCard>
+                    ))}
+                  </div>
                 </div>
-                <input
-                  type="number"
-                  value={operationalControls.maxPaymentsPerHour}
-                  onChange={(e) => handleOperationalChange('maxPaymentsPerHour', parseInt(e.target.value))}
-                  className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center"
-                />
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Max Payments/Day</p>
-                  <p className="text-xs text-gray-500">Per user limit</p>
-                </div>
-                <input
-                  type="number"
-                  value={operationalControls.maxPaymentsPerDay}
-                  onChange={(e) => handleOperationalChange('maxPaymentsPerDay', parseInt(e.target.value))}
-                  className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center"
-                />
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Pending Expiration</p>
-                  <p className="text-xs text-gray-500">Hours until auto-expire</p>
-                </div>
-                <input
-                  type="number"
-                  value={operationalControls.pendingExpirationHours}
-                  onChange={(e) => handleOperationalChange('pendingExpirationHours', parseInt(e.target.value))}
-                  className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center"
-                />
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium text-gray-800">Maker ≠ Checker</p>
-                  <p className="text-xs text-gray-500">Initiator can't approve</p>
-                </div>
-                <button
-                  onClick={() => handleOperationalChange('makerCheckerEnabled', !operationalControls.makerCheckerEnabled)}
-                  className={`w-12 h-6 rounded-full transition-colors ${operationalControls.makerCheckerEnabled ? 'bg-green-500' : 'bg-gray-300'}`}
-                >
-                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${operationalControls.makerCheckerEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* FI Limits View (Read-Only) */}
-      {activeView === 'fi' && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-red-50 to-rose-50">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-red-600" />
-                <h3 className="font-semibold text-gray-800">FI-Level Limits</h3>
-              </div>
-              <span className="px-3 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full flex items-center gap-1">
-                <Lock className="w-3 h-3" />
-                Set by Payfinia
-              </span>
-            </div>
-            <p className="text-sm text-gray-500 mt-1">These limits are configured by Payfinia and cannot be exceeded by role or user limits.</p>
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 bg-gray-50 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-gray-500">Max Single Payment</p>
-                  <DollarSign className="w-4 h-4 text-gray-400" />
-                </div>
-                <p className="text-2xl font-bold text-gray-800">${fiControls.maxSinglePayment.toLocaleString()}</p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-gray-500">Max Daily Volume</p>
-                  <Activity className="w-4 h-4 text-gray-400" />
-                </div>
-                <p className="text-2xl font-bold text-gray-800">${fiControls.maxDailyVolume.toLocaleString()}</p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-gray-500">Min Approvers (>$250K)</p>
-                  <Users className="w-4 h-4 text-gray-400" />
-                </div>
-                <p className="text-2xl font-bold text-gray-800">{fiControls.minApproversOver250k} approvers</p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-gray-500">Min Approvers (>$500K)</p>
-                  <Users className="w-4 h-4 text-gray-400" />
-                </div>
-                <p className="text-2xl font-bold text-gray-800">{fiControls.minApproversOver500k} approvers</p>
-              </div>
-            </div>
-            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                {/* Per-Role Initiation Limits */}
                 <div>
-                  <p className="font-medium text-amber-800">Compensating Controls Active</p>
-                  <ul className="text-sm text-amber-700 mt-1 space-y-1">
-                    <li>• MFA required for all approvals</li>
-                    <li>• Different department required for approvals over $250K</li>
-                    <li>• All limit changes require dual Super Admin approval</li>
-                  </ul>
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Per-Role Initiation Limits</h4>
+                  <p className="text-xs text-gray-400 mb-4">Maximum amounts each role can initiate. Blue dot = override enabled.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-500">
+                              <th className="text-left py-1 font-medium">Role</th>
+                              <th className="text-right py-1 font-medium">Max Sngl</th>
+                              <th className="text-right py-1 font-medium">Daily</th>
+                              <th className="w-4"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(roleLimits[type.id]).map(([role, limits]) => (
+                              <tr key={role} className="border-t border-gray-100">
+                                <td className={`py-2 font-medium ${limits.enabled ? 'text-gray-700' : 'text-gray-400'}`}>{role}</td>
+                                <td className="text-right py-2">
+                                  {limits.enabled ? (
+                                    <input 
+                                      type="text" 
+                                      value={limits.maxSingle?.toLocaleString() || ''} 
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value.replace(/,/g, '')) || null;
+                                        const newLimits = { ...roleLimits };
+                                        newLimits[type.id][role].maxSingle = val;
+                                        setRoleLimits(newLimits);
+                                      }}
+                                      className="w-20 px-2 py-1 border border-gray-200 rounded text-right text-xs"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="text-right py-2">
+                                  {limits.enabled ? (
+                                    <input 
+                                      type="text" 
+                                      value={limits.daily?.toLocaleString() || ''} 
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value.replace(/,/g, '')) || null;
+                                        const newLimits = { ...roleLimits };
+                                        newLimits[type.id][role].daily = val;
+                                        setRoleLimits(newLimits);
+                                      }}
+                                      className="w-20 px-2 py-1 border border-gray-200 rounded text-right text-xs"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="text-center">
+                                  {limits.enabled && <span className="inline-block w-2 h-2 rounded-full bg-blue-500"></span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </TypeCard>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </>
+          )}
+
+          {/* Scheduling Section */}
+          {activeSection === 'scheduling' && (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-1">Scheduling</h3>
+                    <p className="text-sm text-gray-500">Operating windows, time restrictions, and blackout periods per instruction type.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-600">Time Controls</span>
+                    <button className="w-12 h-6 rounded-full bg-blue-600">
+                      <div className="w-5 h-5 bg-white rounded-full shadow translate-x-6" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Operating Windows */}
+                <div className="mb-8">
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Operating Windows</h4>
+                  <p className="text-xs text-gray-400 mb-4">When each rail is available for processing.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-4">
+                          {/* FedNow */}
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="font-medium text-sm text-blue-600">FedNow</span>
+                              <span className="text-xs text-gray-400">24/7</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">Start</label>
+                                <div className="flex items-center gap-1">
+                                  <input 
+                                    type="time" 
+                                    value={operatingWindows[type.id].fednow.start}
+                                    onChange={(e) => {
+                                      const newWindows = { ...operatingWindows };
+                                      newWindows[type.id].fednow.start = e.target.value;
+                                      setOperatingWindows(newWindows);
+                                    }}
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs"
+                                  />
+                                  <Clock className="w-4 h-4 text-gray-400" />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">End</label>
+                                <div className="flex items-center gap-1">
+                                  <input 
+                                    type="time" 
+                                    value={operatingWindows[type.id].fednow.end}
+                                    onChange={(e) => {
+                                      const newWindows = { ...operatingWindows };
+                                      newWindows[type.id].fednow.end = e.target.value;
+                                      setOperatingWindows(newWindows);
+                                    }}
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs"
+                                  />
+                                  <Clock className="w-4 h-4 text-gray-400" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* RTP */}
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="font-medium text-sm text-green-600">RTP</span>
+                              <span className="text-xs text-gray-400">24/7</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">Start</label>
+                                <div className="flex items-center gap-1">
+                                  <input 
+                                    type="time" 
+                                    value={operatingWindows[type.id].rtp.start}
+                                    onChange={(e) => {
+                                      const newWindows = { ...operatingWindows };
+                                      newWindows[type.id].rtp.start = e.target.value;
+                                      setOperatingWindows(newWindows);
+                                    }}
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs"
+                                  />
+                                  <Clock className="w-4 h-4 text-gray-400" />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">End</label>
+                                <div className="flex items-center gap-1">
+                                  <input 
+                                    type="time" 
+                                    value={operatingWindows[type.id].rtp.end}
+                                    onChange={(e) => {
+                                      const newWindows = { ...operatingWindows };
+                                      newWindows[type.id].rtp.end = e.target.value;
+                                      setOperatingWindows(newWindows);
+                                    }}
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs"
+                                  />
+                                  <Clock className="w-4 h-4 text-gray-400" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Role Time Restrictions */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Role Time Restrictions</h4>
+                  <p className="text-xs text-gray-400 mb-4">Restrict certain roles to narrower windows.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <div className="space-y-2">
+                          {Object.entries(roleTimeRestrictions[type.id]).map(([role, restriction]) => (
+                            <div key={role} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                              <span className={`text-sm ${restriction.usesGlobal ? 'text-gray-400' : 'text-gray-700'}`}>{role}</span>
+                              {restriction.usesGlobal ? (
+                                <span className="text-xs text-gray-400 flex items-center gap-1">
+                                  Uses global
+                                  <span className="w-2 h-2 rounded-full bg-gray-300"></span>
+                                </span>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <input 
+                                    type="time" 
+                                    value={restriction.start}
+                                    className="w-16 px-1 py-0.5 border border-gray-200 rounded text-xs text-center"
+                                    onChange={() => {}}
+                                  />
+                                  <span className="text-gray-400">–</span>
+                                  <input 
+                                    type="time" 
+                                    value={restriction.end}
+                                    className="w-16 px-1 py-0.5 border border-gray-200 rounded text-xs text-center"
+                                    onChange={() => {}}
+                                  />
+                                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
