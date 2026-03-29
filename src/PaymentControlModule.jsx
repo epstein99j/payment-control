@@ -12,8 +12,7 @@ import {
 
 // Empty data - no sample data
 const mockPayments = [];
-const mockTemplates = [];
-const mockAuditLogs = [];
+// Mock data placeholders (replaced with SAMPLE_ constants below)
 const mockNotifications = [];
 const mockAccountHolders = [];
 const recentBeneficiaries = [];
@@ -357,18 +356,58 @@ export default function PaymentControlModule() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications] = useState(mockNotifications);
   const [payments, setPayments] = useState(SAMPLE_PAYMENTS);
-  const [templates, setTemplates] = useState(mockTemplates);
-  const [auditLogs, setAuditLogs] = useState(mockAuditLogs);
+  const [templates, setTemplates] = useState(SAMPLE_TEMPLATES);
+  const [auditLogs, setAuditLogs] = useState(SAMPLE_AUDIT_LOGS);
+  const [users, setUsers] = useState(SAMPLE_USERS);
+  const [roles, setRoles] = useState(SAMPLE_ROLES);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  // Add audit log entry
+  const addAuditLog = (action, category, details, metadata = {}) => {
+    const newLog = {
+      id: `AUD-${String(auditLogs.length + 1).padStart(3, '0')}`,
+      timestamp: new Date().toLocaleString('en-US', { 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
+      }).replace(',', ''),
+      action,
+      category,
+      user: currentUser?.name || 'System',
+      userId: currentUser?.id || 'SYSTEM',
+      details,
+      metadata,
+    };
+    setAuditLogs([newLog, ...auditLogs]);
+    console.log('[AUDIT]', newLog); // Also log to console for debugging
+  };
 
   // Handle login
   const handleLogin = (user) => {
     setCurrentUser(user);
+    // Log login after state is set
+    setTimeout(() => {
+      const loginLog = {
+        id: `AUD-${String(auditLogs.length + 1).padStart(3, '0')}`,
+        timestamp: new Date().toLocaleString('en-US', { 
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
+        }).replace(',', ''),
+        action: 'User Login',
+        category: 'auth',
+        user: user.name,
+        userId: user.id,
+        details: `${user.name} logged in successfully`,
+        metadata: { email: user.email },
+      };
+      setAuditLogs(prev => [loginLog, ...prev]);
+      console.log('[AUDIT]', loginLog);
+    }, 100);
   };
 
   // Handle logout
   const handleLogout = () => {
+    addAuditLog('User Logout', 'auth', `${currentUser?.name} logged out`, { email: currentUser?.email });
     setCurrentUser(null);
     setShowUserMenu(false);
   };
@@ -394,6 +433,7 @@ export default function PaymentControlModule() {
   const handleApprovalComplete = async (payment) => {
     const updatedPayment = { ...payment, status: 'approved', approvedBy: currentUser?.name, approvedAt: new Date().toISOString() };
     setPayments(payments.map(p => p.id === payment.id ? updatedPayment : p));
+    addAuditLog('Payment Approved', 'payment', `Approved ${payment.id} for $${payment.amount.toLocaleString()} to ${payment.recipient}`, { paymentId: payment.id, amount: payment.amount, recipient: payment.recipient });
     const result = await sendToApi(updatedPayment, 'approved');
     console.log('API result:', result);
     setApprovalPayment(null);
@@ -403,6 +443,7 @@ export default function PaymentControlModule() {
   const handleRejectComplete = (payment, reason) => {
     const updatedPayment = { ...payment, status: 'rejected', rejectedBy: currentUser?.name, rejectedAt: new Date().toISOString(), rejectionReason: reason };
     setPayments(payments.map(p => p.id === payment.id ? updatedPayment : p));
+    addAuditLog('Payment Rejected', 'payment', `Rejected ${payment.id} for $${payment.amount.toLocaleString()} - ${reason}`, { paymentId: payment.id, amount: payment.amount, reason });
     setRejectPayment(null);
   };
 
@@ -416,6 +457,7 @@ export default function PaymentControlModule() {
       initiatedAt: new Date().toISOString(),
     };
     setPayments([newPayment, ...payments]);
+    addAuditLog('Payment Initiated', 'payment', `Created ${newPayment.id} for $${newPayment.amount.toLocaleString()} to ${newPayment.recipient}`, { paymentId: newPayment.id, amount: newPayment.amount, recipient: newPayment.recipient });
     setShowNewPayment(false);
   };
 
@@ -613,8 +655,8 @@ export default function PaymentControlModule() {
 
         <div className="flex-1 p-6 overflow-auto">
           {activeTab === 'payments' && <PaymentsList payments={payments} onSelectPayment={setSelectedPayment} onNewPayment={() => setShowNewPayment(true)} />}
-          {activeTab === 'templates' && <TemplatesView templates={templates} setTemplates={setTemplates} />}
-          {activeTab === 'controls' && <ControlsPanel />}
+          {activeTab === 'templates' && <TemplatesView templates={templates} setTemplates={setTemplates} onAuditLog={addAuditLog} />}
+          {activeTab === 'controls' && <ControlsPanel users={users} roles={roles} onAuditLog={addAuditLog} />}
           {activeTab === 'audit' && <AuditLog logs={auditLogs} />}
           {activeTab === 'notifications' && <NotificationSettings />}
           {activeTab === 'integrations' && <IntegrationsPanel />}
@@ -1005,387 +1047,896 @@ function PaymentsList({ payments, onSelectPayment, onNewPayment }) {
 }
 
 // Templates View Component
-function TemplatesView({ templates, setTemplates }) {
+function TemplatesView({ templates, setTemplates, onAuditLog }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const handleCreateTemplate = (template) => {
+    const newTemplate = {
+      ...template,
+      id: `TPL-${String(templates.length + 1).padStart(3, '0')}`,
+      status: 'active',
+      createdAt: new Date().toISOString().split('T')[0],
+    };
+    setTemplates([...templates, newTemplate]);
+    onAuditLog?.('Template Created', 'template', `Created template "${template.name}"`, { templateId: newTemplate.id });
+    setShowCreateModal(false);
+  };
+
+  const handleUpdateTemplate = (template) => {
+    setTemplates(templates.map(t => t.id === template.id ? template : t));
+    onAuditLog?.('Template Updated', 'template', `Updated template "${template.name}"`, { templateId: template.id });
+    setEditingTemplate(null);
+  };
+
+  const handleDeleteTemplate = (template) => {
+    if (confirm(`Delete template "${template.name}"?`)) {
+      setTemplates(templates.filter(t => t.id !== template.id));
+      onAuditLog?.('Template Deleted', 'template', `Deleted template "${template.name}"`, { templateId: template.id });
+    }
+  };
+
+  const handleToggleStatus = (template) => {
+    const newStatus = template.status === 'active' ? 'inactive' : 'active';
+    setTemplates(templates.map(t => t.id === template.id ? { ...t, status: newStatus } : t));
+    onAuditLog?.('Template Status Changed', 'template', `${newStatus === 'active' ? 'Activated' : 'Deactivated'} template "${template.name}"`, { templateId: template.id, newStatus });
+  };
+
+  const filteredTemplates = templates.filter(t => 
+    t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.recipient.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="Search templates..." className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          <input 
+            type="text" 
+            placeholder="Search templates..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+          />
         </div>
         <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
           <Plus className="w-4 h-4" />Create Template
         </button>
       </div>
 
-      {templates.length === 0 ? (
+      {filteredTemplates.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
           <EmptyState
             icon={FileText}
-            title="No templates yet"
-            description="Create reusable payment templates for recurring transactions to save time and reduce errors."
-            action={
+            title={searchTerm ? "No matching templates" : "No templates yet"}
+            description={searchTerm ? "Try a different search term." : "Create reusable payment templates for recurring transactions to save time and reduce errors."}
+            action={!searchTerm && (
               <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                 <Plus className="w-4 h-4" />
                 Create Template
               </button>
-            }
+            )}
           />
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {templates.map(template => (
-            <div key={template.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          {filteredTemplates.map(template => (
+            <div key={template.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
-                    <RefreshCw className="w-6 h-6 text-indigo-600" />
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${template.status === 'active' ? 'bg-indigo-100' : 'bg-gray-100'}`}>
+                    <RefreshCw className={`w-6 h-6 ${template.status === 'active' ? 'text-indigo-600' : 'text-gray-400'}`} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold text-gray-800">{template.name}</h3>
                       <StatusBadge status={template.status} />
                     </div>
-                    <p className="text-sm text-gray-500 mt-1">{template.recipient} • ${template.defaultAmount?.toLocaleString()} (default) • {template.frequency}</p>
+                    <p className="text-sm text-gray-500 mt-1">{template.recipient}</p>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                      <span className="flex items-center gap-1">
+                        <DollarSign className="w-3 h-3" />
+                        ${template.defaultAmount?.toLocaleString()} default
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {template.frequency}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded ${template.rail === 'FedNow' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                        {template.rail}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Eye className="w-4 h-4" /></button>
-                  <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><Edit className="w-4 h-4" /></button>
-                  <button className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => setEditingTemplate(template)}
+                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                    title="Edit"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => handleToggleStatus(template)}
+                    className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                    title={template.status === 'active' ? 'Deactivate' : 'Activate'}
+                  >
+                    {template.status === 'active' ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteTemplate(template)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Create/Edit Modal */}
+      {(showCreateModal || editingTemplate) && (
+        <TemplateModal
+          template={editingTemplate}
+          onClose={() => { setShowCreateModal(false); setEditingTemplate(null); }}
+          onSave={editingTemplate ? handleUpdateTemplate : handleCreateTemplate}
+        />
+      )}
     </div>
   );
 }
 
-// Controls Panel
-function ControlsPanel() {
-  const [activeControlTab, setActiveControlTab] = useState('amount');
-  const [editingControl, setEditingControl] = useState(null);
-  
-  // Sample controls state
-  const [amountLimits, setAmountLimits] = useState({
-    singlePaymentMax: { value: 1000000, enabled: true, label: 'Single Payment Maximum', description: 'Maximum amount for any single payment' },
-    dailyLimit: { value: 5000000, enabled: true, label: 'Daily Limit', description: 'Maximum total payments per day' },
-    weeklyLimit: { value: 15000000, enabled: true, label: 'Weekly Limit', description: 'Maximum total payments per week' },
-    monthlyLimit: { value: 50000000, enabled: true, label: 'Monthly Limit', description: 'Maximum total payments per month' },
-    sightVerificationThreshold: { value: 10000, enabled: true, label: 'Sight Verification Threshold', description: 'Below this: sight verification only' },
-    amountVerificationThreshold: { value: 50000, enabled: true, label: 'Amount Verification Threshold', description: 'Above this: require amount re-entry' },
-    fullVerificationThreshold: { value: 250000, enabled: true, label: 'Full Verification Threshold', description: 'Above this: require all details re-entry' },
+// Template Create/Edit Modal
+function TemplateModal({ template, onClose, onSave }) {
+  const [formData, setFormData] = useState(template || {
+    name: '',
+    recipient: '',
+    recipientRtn: '',
+    recipientAccount: '',
+    fromAccount: 'Operating Account ****1234',
+    defaultAmount: '',
+    rail: 'FedNow',
+    memo: '',
+    frequency: 'Monthly',
+    createdBy: 'Current User',
   });
 
-  const [timeControls, setTimeControls] = useState({
-    operatingHoursStart: { value: '08:00', enabled: true, label: 'Operating Hours Start', description: 'Payments allowed after this time' },
-    operatingHoursEnd: { value: '18:00', enabled: true, label: 'Operating Hours End', description: 'Payments blocked after this time' },
-    weekendPayments: { value: false, enabled: true, label: 'Allow Weekend Payments', description: 'Permit payments on Saturday/Sunday' },
-    holidayPayments: { value: false, enabled: true, label: 'Allow Holiday Payments', description: 'Permit payments on bank holidays' },
-    pendingExpirationHours: { value: 24, enabled: true, label: 'Pending Expiration (Hours)', description: 'Auto-expire pending approvals after' },
-    cooldownMinutes: { value: 5, enabled: false, label: 'Duplicate Cooldown (Minutes)', description: 'Block similar payments within timeframe' },
-  });
-
-  const [approvalMatrix, setApprovalMatrix] = useState({
-    tier1Threshold: { value: 10000, approvers: 1, label: 'Tier 1', description: 'Up to $10,000' },
-    tier2Threshold: { value: 50000, approvers: 1, label: 'Tier 2', description: '$10,001 - $50,000' },
-    tier3Threshold: { value: 250000, approvers: 2, label: 'Tier 3', description: '$50,001 - $250,000' },
-    tier4Threshold: { value: 1000000, approvers: 3, label: 'Tier 4', description: '$250,001 - $1,000,000' },
-    requireDifferentDepartment: { value: 250000, enabled: true, label: 'Different Department Required Above', description: 'Require approver from different department' },
-    makerCheckerEnabled: { value: true, enabled: true, label: 'Maker ≠ Checker', description: 'Initiator cannot approve own payments' },
-  });
-
-  const [velocityControls, setVelocityControls] = useState({
-    maxPaymentsPerHour: { value: 20, enabled: true, label: 'Max Payments Per Hour', description: 'Per-user hourly payment limit' },
-    maxPaymentsPerDay: { value: 100, enabled: true, label: 'Max Payments Per Day', description: 'Per-user daily payment count' },
-    maxRecipientsPerDay: { value: 25, enabled: true, label: 'Max Unique Recipients Per Day', description: 'Limit new recipients per day' },
-    newRecipientDelay: { value: 0, enabled: false, label: 'New Recipient Delay (Hours)', description: 'Wait time before sending to new recipient' },
-    largePaymentCooldown: { value: 30, enabled: true, label: 'Large Payment Cooldown (Minutes)', description: 'Delay between payments over $100K' },
-    suspiciousPatternAlert: { value: true, enabled: true, label: 'Suspicious Pattern Alerts', description: 'Alert on unusual payment patterns' },
-  });
-
-  const handleSaveControl = (category, key, newValue) => {
-    switch(category) {
-      case 'amount':
-        setAmountLimits({ ...amountLimits, [key]: { ...amountLimits[key], value: newValue } });
-        break;
-      case 'time':
-        setTimeControls({ ...timeControls, [key]: { ...timeControls[key], value: newValue } });
-        break;
-      case 'approval':
-        setApprovalMatrix({ ...approvalMatrix, [key]: { ...approvalMatrix[key], value: newValue } });
-        break;
-      case 'velocity':
-        setVelocityControls({ ...velocityControls, [key]: { ...velocityControls[key], value: newValue } });
-        break;
-    }
-    setEditingControl(null);
+  const handleSubmit = () => {
+    if (!formData.name || !formData.recipient || !formData.recipientRtn || !formData.defaultAmount) return;
+    onSave({
+      ...formData,
+      defaultAmount: parseFloat(formData.defaultAmount),
+      recipientAccount: formData.recipientAccount ? `****${formData.recipientAccount.slice(-4)}` : '',
+    });
   };
 
-  const handleToggleControl = (category, key) => {
-    switch(category) {
-      case 'amount':
-        setAmountLimits({ ...amountLimits, [key]: { ...amountLimits[key], enabled: !amountLimits[key].enabled } });
-        break;
-      case 'time':
-        setTimeControls({ ...timeControls, [key]: { ...timeControls[key], enabled: !timeControls[key].enabled } });
-        break;
-      case 'approval':
-        setApprovalMatrix({ ...approvalMatrix, [key]: { ...approvalMatrix[key], enabled: !approvalMatrix[key].enabled } });
-        break;
-      case 'velocity':
-        setVelocityControls({ ...velocityControls, [key]: { ...velocityControls[key], enabled: !velocityControls[key].enabled } });
-        break;
-    }
-  };
-
-  const renderControlItem = (category, key, control, isCurrency = false, isTime = false, isBoolean = false) => {
-    const isEditing = editingControl === `${category}-${key}`;
-    
-    return (
-      <div key={key} className={`p-4 rounded-lg border ${control.enabled ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-100'}`}>
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h4 className={`font-medium ${control.enabled ? 'text-gray-800' : 'text-gray-400'}`}>{control.label}</h4>
-              {!control.enabled && <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-500 rounded-full">Disabled</span>}
-            </div>
-            <p className="text-sm text-gray-500 mt-0.5">{control.description}</p>
-          </div>
-          <button
-            onClick={() => handleToggleControl(category, key)}
-            className={`w-10 h-6 rounded-full transition-colors flex-shrink-0 ml-4 ${control.enabled ? 'bg-blue-600' : 'bg-gray-300'}`}
-          >
-            <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${control.enabled ? 'translate-x-5' : 'translate-x-1'}`} />
-          </button>
-        </div>
-        
-        {control.enabled && (
-          <div className="mt-3 flex items-center gap-3">
-            {isEditing ? (
-              <div className="flex items-center gap-2">
-                {isBoolean ? (
-                  <select
-                    defaultValue={control.value.toString()}
-                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                    onChange={(e) => handleSaveControl(category, key, e.target.value === 'true')}
-                  >
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
-                  </select>
-                ) : isTime ? (
-                  <input
-                    type="time"
-                    defaultValue={control.value}
-                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                    onBlur={(e) => handleSaveControl(category, key, e.target.value)}
-                  />
-                ) : (
-                  <div className="flex items-center">
-                    {isCurrency && <span className="text-gray-500 mr-1">$</span>}
-                    <input
-                      type="number"
-                      defaultValue={control.value}
-                      className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-right"
-                      onBlur={(e) => handleSaveControl(category, key, parseFloat(e.target.value))}
-                      autoFocus
-                    />
-                  </div>
-                )}
-                <button
-                  onClick={() => setEditingControl(null)}
-                  className="p-1.5 text-gray-400 hover:text-gray-600"
-                >
-                  <XCircle className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setEditingControl(`${category}-${key}`)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
-              >
-                {isBoolean ? (
-                  <span>{control.value ? 'Yes' : 'No'}</span>
-                ) : isTime ? (
-                  <span>{control.value}</span>
-                ) : (
-                  <span>{isCurrency ? `$${control.value.toLocaleString()}` : control.value.toLocaleString()}</span>
-                )}
-                <Edit className="w-3 h-3 text-gray-400" />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderApprovalTier = (key, tier) => {
-    const isEditing = editingControl === `approval-${key}`;
-    
-    return (
-      <div key={key} className="p-4 bg-white rounded-lg border border-gray-200">
-        <div className="flex items-center justify-between">
-          <div>
-            <h4 className="font-medium text-gray-800">{tier.label}</h4>
-            <p className="text-sm text-gray-500">{tier.description}</p>
-          </div>
-          {isEditing ? (
-            <div className="flex items-center gap-2">
-              <select
-                defaultValue={tier.approvers}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                onChange={(e) => {
-                  setApprovalMatrix({ 
-                    ...approvalMatrix, 
-                    [key]: { ...tier, approvers: parseInt(e.target.value) } 
-                  });
-                  setEditingControl(null);
-                }}
-              >
-                {[1, 2, 3, 4, 5].map(n => (
-                  <option key={n} value={n}>{n} approver{n > 1 ? 's' : ''}</option>
-                ))}
-              </select>
-              <button onClick={() => setEditingControl(null)} className="p-1.5 text-gray-400 hover:text-gray-600">
-                <XCircle className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setEditingControl(`approval-${key}`)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm font-medium text-blue-700 transition-colors"
-            >
-              <Users className="w-4 h-4" />
-              {tier.approvers} approver{tier.approvers > 1 ? 's' : ''}
-              <Edit className="w-3 h-3 text-blue-400" />
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const isValid = formData.name && formData.recipient && formData.recipientRtn && formData.defaultAmount;
 
   return (
-    <div className="grid grid-cols-4 gap-6">
-      <div className="col-span-1 space-y-2">
-        {[
-          { id: 'amount', label: 'Amount Limits', icon: DollarSign },
-          { id: 'time', label: 'Time-Based', icon: Clock },
-          { id: 'approval', label: 'Approval Matrix', icon: Shield },
-          { id: 'velocity', label: 'Velocity Controls', icon: Activity },
-        ].map(tab => (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="p-6 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">
+              {template ? 'Edit Template' : 'Create Template'}
+            </h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
+          {/* Template Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Template Name *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              placeholder="e.g., Monthly Rent Payment"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Recipient */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Recipient Name *</label>
+            <input
+              type="text"
+              value={formData.recipient}
+              onChange={e => setFormData({ ...formData, recipient: e.target.value })}
+              placeholder="Company or individual name"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* RTN and Account */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Routing Number *</label>
+              <input
+                type="text"
+                value={formData.recipientRtn}
+                onChange={e => setFormData({ ...formData, recipientRtn: e.target.value.replace(/\D/g, '').slice(0, 9) })}
+                placeholder="9 digits"
+                maxLength={9}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+              <input
+                type="text"
+                value={formData.recipientAccount?.replace(/\*/g, '')}
+                onChange={e => setFormData({ ...formData, recipientAccount: e.target.value.replace(/\D/g, '') })}
+                placeholder="Account number"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+            </div>
+          </div>
+
+          {/* From Account */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">From Account</label>
+            <select
+              value={formData.fromAccount}
+              onChange={e => setFormData({ ...formData, fromAccount: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              {fromAccounts.filter(a => a.type === 'account').map(acc => (
+                <option key={acc.id} value={`${acc.name} ${acc.number}`}>
+                  {acc.name} ({acc.number})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Amount, Rail, Frequency */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Default Amount *</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <input
+                  type="number"
+                  value={formData.defaultAmount}
+                  onChange={e => setFormData({ ...formData, defaultAmount: e.target.value })}
+                  placeholder="0.00"
+                  className="w-full pl-7 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Rail</label>
+              <select
+                value={formData.rail}
+                onChange={e => setFormData({ ...formData, rail: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="FedNow">FedNow</option>
+                <option value="RTP">RTP</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Frequency</label>
+              <select
+                value={formData.frequency}
+                onChange={e => setFormData({ ...formData, frequency: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="One-time">One-time</option>
+                <option value="Weekly">Weekly</option>
+                <option value="Bi-weekly">Bi-weekly</option>
+                <option value="Monthly">Monthly</option>
+                <option value="Quarterly">Quarterly</option>
+                <option value="Annually">Annually</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Memo */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Default Memo</label>
+            <input
+              type="text"
+              value={formData.memo}
+              onChange={e => setFormData({ ...formData, memo: e.target.value })}
+              placeholder="Payment description"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
           <button
-            key={tab.id}
-            onClick={() => setActiveControlTab(tab.id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
-              activeControlTab === tab.id ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+            onClick={handleSubmit}
+            disabled={!isValid}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {template ? 'Save Changes' : 'Create Template'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Controls Panel - Modern Matrix View
+function ControlsPanel({ users, roles, onAuditLog }) {
+  const [activeView, setActiveView] = useState('limits');
+  const [editingCell, setEditingCell] = useState(null);
+  const [localUsers, setLocalUsers] = useState(users || SAMPLE_USERS);
+  const [localRoles, setLocalRoles] = useState(roles || SAMPLE_ROLES);
+  
+  // FI-Level Controls (read-only, set by Payfinia)
+  const [fiControls] = useState({
+    maxSinglePayment: 1000000,
+    maxDailyVolume: 10000000,
+    minApproversOver250k: 2,
+    minApproversOver500k: 3,
+    requireMfa: true,
+    differentDepartmentOver250k: true,
+  });
+
+  // Operational Controls (editable by Super Admin)
+  const [operationalControls, setOperationalControls] = useState({
+    operatingHoursStart: '08:00',
+    operatingHoursEnd: '18:00',
+    allowWeekendPayments: false,
+    allowHolidayPayments: false,
+    pendingExpirationHours: 24,
+    duplicateCooldownMinutes: 5,
+    maxPaymentsPerHour: 20,
+    maxPaymentsPerDay: 100,
+    makerCheckerEnabled: true,
+  });
+
+  const handleRoleLimitChange = (roleId, field, value) => {
+    const numValue = value === '' ? null : parseInt(value);
+    setLocalRoles(localRoles.map(r => 
+      r.id === roleId ? { ...r, [field]: numValue } : r
+    ));
+    const role = localRoles.find(r => r.id === roleId);
+    onAuditLog?.('Role Limit Changed', 'config', `Updated ${role?.name} ${field} to ${numValue ? '$' + numValue.toLocaleString() : 'Unlimited'}`, { roleId, field, value: numValue });
+    setEditingCell(null);
+  };
+
+  const handleUserLimitChange = (userId, field, value) => {
+    const numValue = value === '' ? null : parseInt(value);
+    setLocalUsers(localUsers.map(u => 
+      u.id === userId ? { ...u, [field]: numValue } : u
+    ));
+    const user = localUsers.find(u => u.id === userId);
+    onAuditLog?.('User Limit Changed', 'config', `Updated ${user?.name} ${field} to ${numValue ? '$' + numValue.toLocaleString() : 'Use Role Default'}`, { userId, field, value: numValue });
+    setEditingCell(null);
+  };
+
+  const handleOperationalChange = (key, value) => {
+    const oldValue = operationalControls[key];
+    setOperationalControls({ ...operationalControls, [key]: value });
+    onAuditLog?.('Control Changed', 'config', `Updated ${key} from ${oldValue} to ${value}`, { control: key, oldValue, newValue: value });
+  };
+
+  const formatLimit = (limit) => {
+    if (limit === null || limit === undefined) return '∞';
+    return '$' + limit.toLocaleString();
+  };
+
+  const views = [
+    { id: 'limits', label: 'Limits Matrix', icon: DollarSign },
+    { id: 'users', label: 'User Limits', icon: Users },
+    { id: 'operational', label: 'Operational', icon: Settings },
+    { id: 'fi', label: 'FI Limits', icon: Building2 },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* View Tabs */}
+      <div className="flex items-center gap-2 p-1 bg-gray-100 rounded-xl w-fit">
+        {views.map(view => (
+          <button
+            key={view.id}
+            onClick={() => setActiveView(view.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeView === view.id 
+                ? 'bg-white text-gray-800 shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            <tab.icon className="w-5 h-5" />
-            <span className="font-medium">{tab.label}</span>
+            <view.icon className="w-4 h-4" />
+            {view.label}
           </button>
         ))}
       </div>
 
-      <div className="col-span-3 bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-        {activeControlTab === 'amount' && (
-          <div className="space-y-4">
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-800">Amount Limits</h3>
-              <p className="text-sm text-gray-500">Configure maximum payment amounts and verification thresholds</p>
-            </div>
-            
-            <div className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payment Limits</h4>
-              {renderControlItem('amount', 'singlePaymentMax', amountLimits.singlePaymentMax, true)}
-              {renderControlItem('amount', 'dailyLimit', amountLimits.dailyLimit, true)}
-              {renderControlItem('amount', 'weeklyLimit', amountLimits.weeklyLimit, true)}
-              {renderControlItem('amount', 'monthlyLimit', amountLimits.monthlyLimit, true)}
-            </div>
+      {/* Limits Matrix View */}
+      {activeView === 'limits' && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+            <h3 className="font-semibold text-gray-800">Role-Based Limits Matrix</h3>
+            <p className="text-sm text-gray-500 mt-1">Set initiation and approval limits for each role. Users inherit role limits unless overridden.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-48">Role</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    <div className="flex flex-col items-center">
+                      <span>Initiation Limit</span>
+                      <span className="text-[10px] font-normal text-gray-400 normal-case">Max payment they can create</span>
+                    </div>
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    <div className="flex flex-col items-center">
+                      <span>Approval Limit</span>
+                      <span className="text-[10px] font-normal text-gray-400 normal-case">Max payment they can approve</span>
+                    </div>
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">Users</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {localRoles.map(role => {
+                  const roleUsers = localUsers.filter(u => u.roleId === role.id && u.status === 'active');
+                  return (
+                    <tr key={role.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                            role.isSuperAdmin ? 'bg-purple-100' : 'bg-blue-100'
+                          }`}>
+                            {role.isSuperAdmin ? (
+                              <ShieldCheck className="w-5 h-5 text-purple-600" />
+                            ) : (
+                              <Briefcase className="w-5 h-5 text-blue-600" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-800">{role.name}</p>
+                            <p className="text-xs text-gray-500">{role.description}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex justify-center">
+                          {editingCell === `${role.id}-initiation` ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500">$</span>
+                              <input
+                                type="number"
+                                defaultValue={role.initiationLimit || ''}
+                                placeholder="Unlimited"
+                                className="w-32 px-3 py-1.5 border border-blue-300 rounded-lg text-sm text-center focus:ring-2 focus:ring-blue-500"
+                                onBlur={(e) => handleRoleLimitChange(role.id, 'initiationLimit', e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleRoleLimitChange(role.id, 'initiationLimit', e.target.value)}
+                                autoFocus
+                              />
+                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => !role.isSuperAdmin && setEditingCell(`${role.id}-initiation`)}
+                              disabled={role.isSuperAdmin}
+                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                role.isSuperAdmin 
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                                  : role.initiationLimit 
+                                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' 
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}
+                            >
+                              {formatLimit(role.initiationLimit)}
+                              {!role.isSuperAdmin && <Edit className="w-3 h-3 ml-2 inline opacity-50" />}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex justify-center">
+                          {editingCell === `${role.id}-approval` ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500">$</span>
+                              <input
+                                type="number"
+                                defaultValue={role.approvalLimit || ''}
+                                placeholder="Unlimited"
+                                className="w-32 px-3 py-1.5 border border-green-300 rounded-lg text-sm text-center focus:ring-2 focus:ring-green-500"
+                                onBlur={(e) => handleRoleLimitChange(role.id, 'approvalLimit', e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleRoleLimitChange(role.id, 'approvalLimit', e.target.value)}
+                                autoFocus
+                              />
+                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => !role.isSuperAdmin && setEditingCell(`${role.id}-approval`)}
+                              disabled={role.isSuperAdmin}
+                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                role.isSuperAdmin 
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                                  : role.approvalLimit 
+                                    ? 'bg-green-50 text-green-700 hover:bg-green-100' 
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}
+                            >
+                              {formatLimit(role.approvalLimit)}
+                              {!role.isSuperAdmin && <Edit className="w-3 h-3 ml-2 inline opacity-50" />}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Users className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">{roleUsers.length}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-            <div className="space-y-3 pt-4 border-t border-gray-200">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Verification Thresholds</h4>
-              {renderControlItem('amount', 'sightVerificationThreshold', amountLimits.sightVerificationThreshold, true)}
-              {renderControlItem('amount', 'amountVerificationThreshold', amountLimits.amountVerificationThreshold, true)}
-              {renderControlItem('amount', 'fullVerificationThreshold', amountLimits.fullVerificationThreshold, true)}
+      {/* User Limits View */}
+      {activeView === 'users' && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-green-50 to-emerald-50">
+            <h3 className="font-semibold text-gray-800">Individual User Limits</h3>
+            <p className="text-sm text-gray-500 mt-1">Override role defaults for specific users. Empty = inherits from role.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">User</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Role</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    <div className="flex flex-col items-center">
+                      <span>Initiation Limit</span>
+                      <span className="text-[10px] font-normal text-gray-400 normal-case">Role default shown in gray</span>
+                    </div>
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    <div className="flex flex-col items-center">
+                      <span>Approval Limit</span>
+                      <span className="text-[10px] font-normal text-gray-400 normal-case">Role default shown in gray</span>
+                    </div>
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Effective</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {localUsers.filter(u => u.status === 'active').map(user => {
+                  const role = localRoles.find(r => r.id === user.roleId);
+                  const effectiveInitiation = user.initiationLimit ?? role?.initiationLimit;
+                  const effectiveApproval = user.approvalLimit ?? role?.approvalLimit;
+                  
+                  return (
+                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium text-white ${
+                            user.isSuperAdmin ? 'bg-purple-500' : 'bg-blue-500'
+                          }`}>
+                            {user.name.split(' ').map(n => n[0]).join('')}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-800">{user.name}</p>
+                            <p className="text-xs text-gray-500">{user.department}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          user.isSuperAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {user.roleName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-col items-center gap-1">
+                          {editingCell === `${user.id}-initiation` ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500">$</span>
+                              <input
+                                type="number"
+                                defaultValue={user.initiationLimit || ''}
+                                placeholder="Use role default"
+                                className="w-28 px-2 py-1 border border-blue-300 rounded text-sm text-center focus:ring-2 focus:ring-blue-500"
+                                onBlur={(e) => handleUserLimitChange(user.id, 'initiationLimit', e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUserLimitChange(user.id, 'initiationLimit', e.target.value)}
+                                autoFocus
+                              />
+                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => !user.isSuperAdmin && setEditingCell(`${user.id}-initiation`)}
+                              disabled={user.isSuperAdmin}
+                              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
+                                user.isSuperAdmin 
+                                  ? 'bg-gray-50 text-gray-400 cursor-not-allowed' 
+                                  : user.initiationLimit !== null && user.initiationLimit !== undefined
+                                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 ring-2 ring-blue-200' 
+                                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                              }`}
+                            >
+                              {user.initiationLimit !== null && user.initiationLimit !== undefined 
+                                ? formatLimit(user.initiationLimit)
+                                : <span className="text-gray-400">{formatLimit(role?.initiationLimit)}</span>
+                              }
+                              {!user.isSuperAdmin && <Edit className="w-3 h-3 ml-1 inline opacity-40" />}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-col items-center gap-1">
+                          {editingCell === `${user.id}-approval` ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500">$</span>
+                              <input
+                                type="number"
+                                defaultValue={user.approvalLimit || ''}
+                                placeholder="Use role default"
+                                className="w-28 px-2 py-1 border border-green-300 rounded text-sm text-center focus:ring-2 focus:ring-green-500"
+                                onBlur={(e) => handleUserLimitChange(user.id, 'approvalLimit', e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUserLimitChange(user.id, 'approvalLimit', e.target.value)}
+                                autoFocus
+                              />
+                              <button onClick={() => setEditingCell(null)} className="text-gray-400 hover:text-gray-600">
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => !user.isSuperAdmin && setEditingCell(`${user.id}-approval`)}
+                              disabled={user.isSuperAdmin}
+                              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
+                                user.isSuperAdmin 
+                                  ? 'bg-gray-50 text-gray-400 cursor-not-allowed' 
+                                  : user.approvalLimit !== null && user.approvalLimit !== undefined
+                                    ? 'bg-green-50 text-green-700 hover:bg-green-100 ring-2 ring-green-200' 
+                                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                              }`}
+                            >
+                              {user.approvalLimit !== null && user.approvalLimit !== undefined 
+                                ? formatLimit(user.approvalLimit)
+                                : <span className="text-gray-400">{formatLimit(role?.approvalLimit)}</span>
+                              }
+                              {!user.isSuperAdmin && <Edit className="w-3 h-3 ml-1 inline opacity-40" />}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="text-center space-y-1">
+                          <div className="text-xs">
+                            <span className="text-gray-500">Init:</span>{' '}
+                            <span className="font-medium text-blue-600">{formatLimit(effectiveInitiation)}</span>
+                          </div>
+                          <div className="text-xs">
+                            <span className="text-gray-500">Appr:</span>{' '}
+                            <span className="font-medium text-green-600">{formatLimit(effectiveApproval)}</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Operational Controls View */}
+      {activeView === 'operational' && (
+        <div className="grid grid-cols-2 gap-6">
+          {/* Operating Hours */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-600" />
+                <h3 className="font-semibold text-gray-800">Operating Hours</h3>
+              </div>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Start Time</p>
+                  <p className="text-xs text-gray-500">Payments allowed after</p>
+                </div>
+                <input
+                  type="time"
+                  value={operationalControls.operatingHoursStart}
+                  onChange={(e) => handleOperationalChange('operatingHoursStart', e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">End Time</p>
+                  <p className="text-xs text-gray-500">Payments blocked after</p>
+                </div>
+                <input
+                  type="time"
+                  value={operationalControls.operatingHoursEnd}
+                  onChange={(e) => handleOperationalChange('operatingHoursEnd', e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Weekend Payments</p>
+                  <p className="text-xs text-gray-500">Allow on Sat/Sun</p>
+                </div>
+                <button
+                  onClick={() => handleOperationalChange('allowWeekendPayments', !operationalControls.allowWeekendPayments)}
+                  className={`w-12 h-6 rounded-full transition-colors ${operationalControls.allowWeekendPayments ? 'bg-green-500' : 'bg-gray-300'}`}
+                >
+                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${operationalControls.allowWeekendPayments ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Holiday Payments</p>
+                  <p className="text-xs text-gray-500">Allow on bank holidays</p>
+                </div>
+                <button
+                  onClick={() => handleOperationalChange('allowHolidayPayments', !operationalControls.allowHolidayPayments)}
+                  className={`w-12 h-6 rounded-full transition-colors ${operationalControls.allowHolidayPayments ? 'bg-green-500' : 'bg-gray-300'}`}
+                >
+                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${operationalControls.allowHolidayPayments ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
             </div>
           </div>
-        )}
 
-        {activeControlTab === 'time' && (
-          <div className="space-y-4">
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-800">Time-Based Controls</h3>
-              <p className="text-sm text-gray-500">Configure operating hours and time-related restrictions</p>
+          {/* Velocity Controls */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-violet-50 to-purple-50">
+              <div className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-violet-600" />
+                <h3 className="font-semibold text-gray-800">Velocity Controls</h3>
+              </div>
             </div>
-            
-            <div className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Operating Hours</h4>
-              {renderControlItem('time', 'operatingHoursStart', timeControls.operatingHoursStart, false, true)}
-              {renderControlItem('time', 'operatingHoursEnd', timeControls.operatingHoursEnd, false, true)}
-              {renderControlItem('time', 'weekendPayments', timeControls.weekendPayments, false, false, true)}
-              {renderControlItem('time', 'holidayPayments', timeControls.holidayPayments, false, false, true)}
-            </div>
-
-            <div className="space-y-3 pt-4 border-t border-gray-200">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Timing Rules</h4>
-              {renderControlItem('time', 'pendingExpirationHours', timeControls.pendingExpirationHours)}
-              {renderControlItem('time', 'cooldownMinutes', timeControls.cooldownMinutes)}
+            <div className="p-4 space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Max Payments/Hour</p>
+                  <p className="text-xs text-gray-500">Per user limit</p>
+                </div>
+                <input
+                  type="number"
+                  value={operationalControls.maxPaymentsPerHour}
+                  onChange={(e) => handleOperationalChange('maxPaymentsPerHour', parseInt(e.target.value))}
+                  className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Max Payments/Day</p>
+                  <p className="text-xs text-gray-500">Per user limit</p>
+                </div>
+                <input
+                  type="number"
+                  value={operationalControls.maxPaymentsPerDay}
+                  onChange={(e) => handleOperationalChange('maxPaymentsPerDay', parseInt(e.target.value))}
+                  className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Pending Expiration</p>
+                  <p className="text-xs text-gray-500">Hours until auto-expire</p>
+                </div>
+                <input
+                  type="number"
+                  value={operationalControls.pendingExpirationHours}
+                  onChange={(e) => handleOperationalChange('pendingExpirationHours', parseInt(e.target.value))}
+                  className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center"
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800">Maker ≠ Checker</p>
+                  <p className="text-xs text-gray-500">Initiator can't approve</p>
+                </div>
+                <button
+                  onClick={() => handleOperationalChange('makerCheckerEnabled', !operationalControls.makerCheckerEnabled)}
+                  className={`w-12 h-6 rounded-full transition-colors ${operationalControls.makerCheckerEnabled ? 'bg-green-500' : 'bg-gray-300'}`}
+                >
+                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${operationalControls.makerCheckerEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {activeControlTab === 'approval' && (
-          <div className="space-y-4">
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-800">Approval Matrix</h3>
-              <p className="text-sm text-gray-500">Configure approval requirements based on payment amounts</p>
+      {/* FI Limits View (Read-Only) */}
+      {activeView === 'fi' && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-red-50 to-rose-50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-red-600" />
+                <h3 className="font-semibold text-gray-800">FI-Level Limits</h3>
+              </div>
+              <span className="px-3 py-1 bg-red-100 text-red-700 text-xs font-medium rounded-full flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                Set by Payfinia
+              </span>
             </div>
-            
-            <div className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Approval Tiers</h4>
-              {renderApprovalTier('tier1Threshold', approvalMatrix.tier1Threshold)}
-              {renderApprovalTier('tier2Threshold', approvalMatrix.tier2Threshold)}
-              {renderApprovalTier('tier3Threshold', approvalMatrix.tier3Threshold)}
-              {renderApprovalTier('tier4Threshold', approvalMatrix.tier4Threshold)}
+            <p className="text-sm text-gray-500 mt-1">These limits are configured by Payfinia and cannot be exceeded by role or user limits.</p>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-gray-50 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-gray-500">Max Single Payment</p>
+                  <DollarSign className="w-4 h-4 text-gray-400" />
+                </div>
+                <p className="text-2xl font-bold text-gray-800">${fiControls.maxSinglePayment.toLocaleString()}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-gray-500">Max Daily Volume</p>
+                  <Activity className="w-4 h-4 text-gray-400" />
+                </div>
+                <p className="text-2xl font-bold text-gray-800">${fiControls.maxDailyVolume.toLocaleString()}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-gray-500">Min Approvers (>$250K)</p>
+                  <Users className="w-4 h-4 text-gray-400" />
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{fiControls.minApproversOver250k} approvers</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-gray-500">Min Approvers (>$500K)</p>
+                  <Users className="w-4 h-4 text-gray-400" />
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{fiControls.minApproversOver500k} approvers</p>
+              </div>
             </div>
-
-            <div className="space-y-3 pt-4 border-t border-gray-200">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Additional Rules</h4>
-              {renderControlItem('approval', 'requireDifferentDepartment', approvalMatrix.requireDifferentDepartment, true)}
-              {renderControlItem('approval', 'makerCheckerEnabled', approvalMatrix.makerCheckerEnabled, false, false, true)}
+            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-amber-800">Compensating Controls Active</p>
+                  <ul className="text-sm text-amber-700 mt-1 space-y-1">
+                    <li>• MFA required for all approvals</li>
+                    <li>• Different department required for approvals over $250K</li>
+                    <li>• All limit changes require dual Super Admin approval</li>
+                  </ul>
+                </div>
+              </div>
             </div>
           </div>
-        )}
-
-        {activeControlTab === 'velocity' && (
-          <div className="space-y-4">
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-800">Velocity Controls</h3>
-              <p className="text-sm text-gray-500">Configure rate limits and pattern-based restrictions</p>
-            </div>
-            
-            <div className="space-y-3">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Rate Limits</h4>
-              {renderControlItem('velocity', 'maxPaymentsPerHour', velocityControls.maxPaymentsPerHour)}
-              {renderControlItem('velocity', 'maxPaymentsPerDay', velocityControls.maxPaymentsPerDay)}
-              {renderControlItem('velocity', 'maxRecipientsPerDay', velocityControls.maxRecipientsPerDay)}
-            </div>
-
-            <div className="space-y-3 pt-4 border-t border-gray-200">
-              <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Cooldowns & Alerts</h4>
-              {renderControlItem('velocity', 'newRecipientDelay', velocityControls.newRecipientDelay)}
-              {renderControlItem('velocity', 'largePaymentCooldown', velocityControls.largePaymentCooldown)}
-              {renderControlItem('velocity', 'suspiciousPatternAlert', velocityControls.suspiciousPatternAlert, false, false, true)}
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1393,29 +1944,124 @@ function ControlsPanel() {
 // Audit Log Component
 function AuditLog({ logs }) {
   const [filter, setFilter] = useState('all');
-  const categories = ['all', 'payment', 'approval', 'config', 'template'];
+  const [searchTerm, setSearchTerm] = useState('');
+  const categories = ['all', 'payment', 'auth', 'config', 'template', 'admin'];
+
+  const getCategoryColor = (category) => {
+    switch(category) {
+      case 'payment': return 'bg-blue-100 text-blue-700';
+      case 'auth': return 'bg-purple-100 text-purple-700';
+      case 'config': return 'bg-amber-100 text-amber-700';
+      case 'template': return 'bg-green-100 text-green-700';
+      case 'admin': return 'bg-red-100 text-red-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const getActionIcon = (action) => {
+    if (action.includes('Login') || action.includes('Logout')) return <Lock className="w-4 h-4" />;
+    if (action.includes('Approved')) return <CheckCircle className="w-4 h-4 text-green-600" />;
+    if (action.includes('Rejected')) return <XCircle className="w-4 h-4 text-red-600" />;
+    if (action.includes('Created') || action.includes('Initiated')) return <Plus className="w-4 h-4 text-blue-600" />;
+    if (action.includes('Changed') || action.includes('Updated')) return <Edit className="w-4 h-4 text-amber-600" />;
+    if (action.includes('Deleted')) return <Trash2 className="w-4 h-4 text-red-600" />;
+    return <Activity className="w-4 h-4 text-gray-600" />;
+  };
+
+  const filteredLogs = logs
+    .filter(log => filter === 'all' || log.category === filter)
+    .filter(log => 
+      searchTerm === '' || 
+      log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.user.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.details.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+  const handleExport = () => {
+    const csv = [
+      ['Timestamp', 'Action', 'Category', 'User', 'Details'].join(','),
+      ...filteredLogs.map(log => [
+        `"${log.timestamp}"`,
+        `"${log.action}"`,
+        `"${log.category}"`,
+        `"${log.user}"`,
+        `"${log.details.replace(/"/g, '""')}"`
+      ].join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-log-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+  };
 
   return (
     <div className="space-y-4">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-5 gap-4">
+        {categories.filter(c => c !== 'all').map(cat => {
+          const count = logs.filter(l => l.category === cat).length;
+          return (
+            <button
+              key={cat}
+              onClick={() => setFilter(cat === filter ? 'all' : cat)}
+              className={`p-4 rounded-xl border-2 transition-all ${
+                filter === cat 
+                  ? 'border-blue-500 bg-blue-50' 
+                  : 'border-gray-200 bg-white hover:border-gray-300'
+              }`}
+            >
+              <p className="text-2xl font-bold text-gray-800">{count}</p>
+              <p className="text-sm text-gray-500 capitalize">{cat}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filters */}
       <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="Search audit logs..." className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg" />
+          <input 
+            type="text" 
+            placeholder="Search logs..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+          />
         </div>
         <div className="flex items-center gap-2">
           {categories.map(cat => (
-            <button key={cat} onClick={() => setFilter(cat)} className={`px-3 py-1.5 text-sm font-medium rounded-lg capitalize ${filter === cat ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600'}`}>{cat}</button>
+            <button 
+              key={cat} 
+              onClick={() => setFilter(cat)} 
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg capitalize transition-colors ${
+                filter === cat 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {cat}
+            </button>
           ))}
         </div>
-        <button className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600"><Download className="w-4 h-4" />Export</button>
+        <button 
+          onClick={handleExport}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          Export CSV
+        </button>
       </div>
       
-      {logs.length === 0 ? (
+      {filteredLogs.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
           <EmptyState
             icon={Clock}
-            title="No audit logs yet"
-            description="All payment activities, approvals, and configuration changes will be recorded here."
+            title={searchTerm || filter !== 'all' ? "No matching logs" : "No audit logs yet"}
+            description={searchTerm || filter !== 'all' ? "Try adjusting your filters." : "All payment activities, approvals, and configuration changes will be recorded here."}
           />
         </div>
       ) : (
@@ -1423,19 +2069,36 @@ function AuditLog({ logs }) {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-44">Timestamp</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Action</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">Category</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-36">User</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {logs.map(log => (
-                <tr key={log.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm text-gray-500 font-mono">{log.timestamp}</td>
-                  <td className="px-4 py-3 text-sm text-gray-800 font-medium">{log.action}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{log.user}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600 max-w-md truncate">{log.details}</td>
+              {filteredLogs.map(log => (
+                <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <span className="text-sm text-gray-500 font-mono">{log.timestamp}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      {getActionIcon(log.action)}
+                      <span className="text-sm font-medium text-gray-800">{log.action}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${getCategoryColor(log.category)}`}>
+                      {log.category}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-sm text-gray-700">{log.user}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-sm text-gray-600">{log.details}</span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1978,12 +2641,12 @@ function RejectModal({ payment, onClose, onReject }) {
 
 // Sample data for FI Admin panel
 const SAMPLE_USERS = [
-  { id: 'USR-001', name: 'Justin Davis', email: 'jdavis@fnb.com', password: 'demo123', phone: '(555) 111-2222', roleId: 'ROLE-SA', roleName: 'Super Admin', department: 'Treasury', isSuperAdmin: true, status: 'active', createdAt: '2024-01-15T10:00:00Z' },
-  { id: 'USR-002', name: 'Maria Garcia', email: 'mgarcia@fnb.com', password: 'demo123', phone: '(555) 222-3333', roleId: 'ROLE-SA', roleName: 'Super Admin', department: 'Operations', isSuperAdmin: true, status: 'active', createdAt: '2024-01-15T10:00:00Z' },
-  { id: 'USR-003', name: 'James Wilson', email: 'jwilson@fnb.com', password: 'demo123', phone: '(555) 333-4444', roleId: 'ROLE-TM', roleName: 'Treasury Manager', department: 'Treasury', isSuperAdmin: false, status: 'active', createdAt: '2024-02-20T14:30:00Z' },
-  { id: 'USR-004', name: 'Emily Chen', email: 'echen@fnb.com', password: 'demo123', phone: '(555) 444-5555', roleId: 'ROLE-PA', roleName: 'Payment Approver', department: 'Finance', isSuperAdmin: false, status: 'active', createdAt: '2024-03-10T09:15:00Z' },
-  { id: 'USR-005', name: 'Robert Taylor', email: 'rtaylor@fnb.com', password: 'demo123', phone: '(555) 555-6666', roleId: 'ROLE-PI', roleName: 'Payment Initiator', department: 'Accounts Payable', isSuperAdmin: false, status: 'active', createdAt: '2024-04-05T11:45:00Z' },
-  { id: 'USR-006', name: 'Sarah Johnson', email: 'sjohnson@fnb.com', password: 'demo123', phone: '(555) 666-7777', roleId: 'ROLE-PI', roleName: 'Payment Initiator', department: 'Accounts Payable', isSuperAdmin: false, status: 'inactive', createdAt: '2024-05-12T16:00:00Z' },
+  { id: 'USR-001', name: 'Justin Davis', email: 'jdavis@fnb.com', password: 'demo123', phone: '(555) 111-2222', roleId: 'ROLE-SA', roleName: 'Super Admin', department: 'Treasury', isSuperAdmin: true, status: 'active', createdAt: '2024-01-15T10:00:00Z', initiationLimit: null, approvalLimit: null },
+  { id: 'USR-002', name: 'Maria Garcia', email: 'mgarcia@fnb.com', password: 'demo123', phone: '(555) 222-3333', roleId: 'ROLE-SA', roleName: 'Super Admin', department: 'Operations', isSuperAdmin: true, status: 'active', createdAt: '2024-01-15T10:00:00Z', initiationLimit: null, approvalLimit: null },
+  { id: 'USR-003', name: 'James Wilson', email: 'jwilson@fnb.com', password: 'demo123', phone: '(555) 333-4444', roleId: 'ROLE-TM', roleName: 'Treasury Manager', department: 'Treasury', isSuperAdmin: false, status: 'active', createdAt: '2024-02-20T14:30:00Z', initiationLimit: 250000, approvalLimit: 500000 },
+  { id: 'USR-004', name: 'Emily Chen', email: 'echen@fnb.com', password: 'demo123', phone: '(555) 444-5555', roleId: 'ROLE-PA', roleName: 'Payment Approver', department: 'Finance', isSuperAdmin: false, status: 'active', createdAt: '2024-03-10T09:15:00Z', initiationLimit: null, approvalLimit: 75000 },
+  { id: 'USR-005', name: 'Robert Taylor', email: 'rtaylor@fnb.com', password: 'demo123', phone: '(555) 555-6666', roleId: 'ROLE-PI', roleName: 'Payment Initiator', department: 'Accounts Payable', isSuperAdmin: false, status: 'active', createdAt: '2024-04-05T11:45:00Z', initiationLimit: 25000, approvalLimit: null },
+  { id: 'USR-006', name: 'Sarah Johnson', email: 'sjohnson@fnb.com', password: 'demo123', phone: '(555) 666-7777', roleId: 'ROLE-PI', roleName: 'Payment Initiator', department: 'Accounts Payable', isSuperAdmin: false, status: 'inactive', createdAt: '2024-05-12T16:00:00Z', initiationLimit: 10000, approvalLimit: null },
 ];
 
 // Sample payments for testing
@@ -1996,11 +2659,40 @@ const SAMPLE_PAYMENTS = [
 ];
 
 const SAMPLE_ROLES = [
-  { id: 'ROLE-SA', name: 'Super Admin', isSuperAdmin: true, isSystemRole: true, permissions: Object.keys(PERMISSION_DEFINITIONS), approvalLimit: null },
-  { id: 'ROLE-TM', name: 'Treasury Manager', isSuperAdmin: false, isSystemRole: false, permissions: ['initiate_payments', 'approve_payments', 'reject_payments', 'view_all_payments', 'create_templates', 'edit_templates', 'use_templates', 'view_controls', 'view_audit_logs'], approvalLimit: 500000 },
-  { id: 'ROLE-PA', name: 'Payment Approver', isSuperAdmin: false, isSystemRole: false, permissions: ['approve_payments', 'reject_payments', 'view_all_payments', 'use_templates', 'view_audit_logs'], approvalLimit: 100000 },
-  { id: 'ROLE-PI', name: 'Payment Initiator', isSuperAdmin: false, isSystemRole: false, permissions: ['initiate_payments', 'use_templates', 'view_audit_logs'], approvalLimit: null },
-  { id: 'ROLE-AUD', name: 'Auditor', isSuperAdmin: false, isSystemRole: false, permissions: ['view_all_payments', 'view_controls', 'view_users', 'view_roles', 'view_audit_logs', 'export_audit_logs'], approvalLimit: null },
+  { id: 'ROLE-SA', name: 'Super Admin', isSuperAdmin: true, isSystemRole: true, permissions: Object.keys(PERMISSION_DEFINITIONS), initiationLimit: null, approvalLimit: null, description: 'Full system access' },
+  { id: 'ROLE-TM', name: 'Treasury Manager', isSuperAdmin: false, isSystemRole: false, permissions: ['initiate_payments', 'approve_payments', 'reject_payments', 'view_all_payments', 'create_templates', 'edit_templates', 'use_templates', 'view_controls', 'view_audit_logs'], initiationLimit: 500000, approvalLimit: 500000, description: 'Senior treasury operations' },
+  { id: 'ROLE-PA', name: 'Payment Approver', isSuperAdmin: false, isSystemRole: false, permissions: ['approve_payments', 'reject_payments', 'view_all_payments', 'use_templates', 'view_audit_logs'], initiationLimit: null, approvalLimit: 100000, description: 'Approve payments only' },
+  { id: 'ROLE-PI', name: 'Payment Initiator', isSuperAdmin: false, isSystemRole: false, permissions: ['initiate_payments', 'use_templates', 'view_audit_logs'], initiationLimit: 50000, approvalLimit: null, description: 'Create payments only' },
+  { id: 'ROLE-AUD', name: 'Auditor', isSuperAdmin: false, isSystemRole: false, permissions: ['view_all_payments', 'view_controls', 'view_users', 'view_roles', 'view_audit_logs', 'export_audit_logs'], initiationLimit: null, approvalLimit: null, description: 'Read-only audit access' },
+];
+
+// FI-Level Limits (set by Payfinia, read-only for FI)
+const FI_LIMITS = {
+  maxSinglePayment: 1000000,
+  maxDailyVolume: 10000000,
+  maxWeeklyVolume: 50000000,
+  requireMfa: true,
+  minApproversOver250k: 2,
+  minApproversOver500k: 3,
+  differentDepartmentOver250k: true,
+};
+
+// Sample Audit Log entries
+const SAMPLE_AUDIT_LOGS = [
+  { id: 'AUD-001', timestamp: '2025-03-28 11:45:23', action: 'Payment Approved', category: 'payment', user: 'Emily Chen', userId: 'USR-004', details: 'Approved PAY-2025-003 for $15,000 to Smith & Associates', metadata: { paymentId: 'PAY-2025-003', amount: 15000 } },
+  { id: 'AUD-002', timestamp: '2025-03-28 10:30:15', action: 'Payment Initiated', category: 'payment', user: 'James Wilson', userId: 'USR-003', details: 'Created PAY-2025-004 for $500,000 to Tech Solutions LLC', metadata: { paymentId: 'PAY-2025-004', amount: 500000 } },
+  { id: 'AUD-003', timestamp: '2025-03-28 09:15:42', action: 'User Login', category: 'auth', user: 'Justin Davis', userId: 'USR-001', details: 'Successful login from 192.168.1.100', metadata: { ip: '192.168.1.100' } },
+  { id: 'AUD-004', timestamp: '2025-03-27 16:20:33', action: 'Control Changed', category: 'config', user: 'Maria Garcia', userId: 'USR-002', details: 'Updated daily velocity limit from 50 to 100 payments', metadata: { control: 'maxPaymentsPerDay', oldValue: 50, newValue: 100 } },
+  { id: 'AUD-005', timestamp: '2025-03-27 14:05:18', action: 'Role Created', category: 'admin', user: 'Justin Davis', userId: 'USR-001', details: 'Created new role "Wire Specialist" with approval limit $250,000', metadata: { roleId: 'ROLE-WS', approvalLimit: 250000 } },
+  { id: 'AUD-006', timestamp: ' 2025-03-27 11:30:00', action: 'Template Created', category: 'template', user: 'James Wilson', userId: 'USR-003', details: 'Created template "Monthly Rent - HQ Office"', metadata: { templateId: 'TPL-001' } },
+  { id: 'AUD-007', timestamp: '2025-03-26 15:45:22', action: 'Payment Rejected', category: 'payment', user: 'Emily Chen', userId: 'USR-004', details: 'Rejected PAY-2025-005 - Duplicate payment', metadata: { paymentId: 'PAY-2025-005', reason: 'Duplicate payment' } },
+];
+
+// Sample Templates
+const SAMPLE_TEMPLATES = [
+  { id: 'TPL-001', name: 'Monthly Rent - HQ Office', recipient: 'ABC Property Management', recipientRtn: '021000089', recipientAccount: '****4521', fromAccount: 'Operating Account ****1234', defaultAmount: 25000, rail: 'FedNow', memo: 'Monthly office rent', frequency: 'Monthly', status: 'active', createdBy: 'James Wilson', createdAt: '2025-01-15' },
+  { id: 'TPL-002', name: 'Payroll - ADP', recipient: 'ADP Payroll Services', recipientRtn: '021000021', recipientAccount: '****7890', fromAccount: 'Payroll Account ****5678', defaultAmount: 150000, rail: 'FedNow', memo: 'Bi-weekly payroll', frequency: 'Bi-weekly', status: 'active', createdBy: 'Justin Davis', createdAt: '2025-01-10' },
+  { id: 'TPL-003', name: 'Insurance Premium', recipient: 'National Insurance Co', recipientRtn: '026009593', recipientAccount: '****3456', fromAccount: 'Operating Account ****1234', defaultAmount: 8500, rail: 'RTP', memo: 'Monthly premium', frequency: 'Monthly', status: 'active', createdBy: 'James Wilson', createdAt: '2025-02-01' },
 ];
 
 const SAMPLE_DEPARTMENTS = [
