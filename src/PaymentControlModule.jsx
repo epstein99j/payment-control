@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import {
   Bell, Shield, Clock, Users, FileText, Settings, Send, CheckCircle,
   XCircle, AlertTriangle, ChevronRight, Plus, Search, Download,
@@ -9,6 +9,546 @@ import {
   UserCog, Layers, ShieldCheck, UserPlus, UserX, Info, HelpCircle, ArrowRight,
   LogOut, ChevronDown
 } from 'lucide-react';
+
+// ============================================================================
+// FIREBASE & TRACKING CONFIGURATION
+// ============================================================================
+
+// Firebase configuration - Replace with your actual config
+const FIREBASE_CONFIG = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID",
+  measurementId: "YOUR_MEASUREMENT_ID"
+};
+
+// Tracking configuration
+const TRACKING_CONFIG = {
+  enabled: true,
+  consoleLogging: true,
+  firebaseAnalytics: true,
+  firestorePersistence: true,
+  clickTracking: true,
+  navigationTracking: true,
+  formTracking: true,
+  performanceTracking: true,
+  sessionTracking: true,
+  errorTracking: true,
+};
+
+// ============================================================================
+// TRACKING CONTEXT & PROVIDER
+// ============================================================================
+
+const TrackingContext = createContext(null);
+
+// Generate unique session ID
+const generateSessionId = () => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+// Tracking Provider Component
+const TrackingProvider = ({ children, currentUser }) => {
+  const [sessionId] = useState(generateSessionId);
+  const [eventQueue, setEventQueue] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const sessionStartTime = useRef(Date.now());
+  const lastActivityTime = useRef(Date.now());
+  const pageViewCount = useRef(0);
+  const clickCount = useRef(0);
+
+  // Firebase instances (would be initialized in real app)
+  const analyticsRef = useRef(null);
+  const firestoreRef = useRef(null);
+
+  // Track online/offline status
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Flush event queue when back online
+  useEffect(() => {
+    if (isOnline && eventQueue.length > 0) {
+      eventQueue.forEach(event => persistEvent(event));
+      setEventQueue([]);
+    }
+  }, [isOnline, eventQueue]);
+
+  // Core tracking function
+  const track = useCallback((eventName, eventData = {}, options = {}) => {
+    if (!TRACKING_CONFIG.enabled) return;
+
+    const timestamp = new Date().toISOString();
+    const event = {
+      eventName,
+      eventData,
+      timestamp,
+      sessionId,
+      userId: currentUser?.id || 'anonymous',
+      userName: currentUser?.name || 'Anonymous',
+      userRole: currentUser?.roleName || 'Unknown',
+      userDepartment: currentUser?.department || 'Unknown',
+      sessionDuration: Math.round((Date.now() - sessionStartTime.current) / 1000),
+      timeSinceLastActivity: Math.round((Date.now() - lastActivityTime.current) / 1000),
+      pageViewCount: pageViewCount.current,
+      clickCount: clickCount.current,
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      screenSize: `${window.innerWidth}x${window.innerHeight}`,
+      ...options.additionalData,
+    };
+
+    lastActivityTime.current = Date.now();
+
+    // Console logging
+    if (TRACKING_CONFIG.consoleLogging) {
+      const style = getEventStyle(eventName);
+      console.log(
+        `%c[TRACK] ${eventName}`,
+        style,
+        event
+      );
+    }
+
+    // Persist to Firestore / Analytics
+    if (isOnline) {
+      persistEvent(event);
+    } else {
+      setEventQueue(prev => [...prev, event]);
+    }
+
+    return event;
+  }, [currentUser, sessionId, isOnline]);
+
+  // Persist event to Firebase
+  const persistEvent = async (event) => {
+    try {
+      // Firebase Analytics
+      if (TRACKING_CONFIG.firebaseAnalytics && analyticsRef.current) {
+        // In real app: logEvent(analyticsRef.current, event.eventName, event.eventData);
+      }
+
+      // Firestore persistence
+      if (TRACKING_CONFIG.firestorePersistence && firestoreRef.current) {
+        // In real app: await addDoc(collection(firestoreRef.current, 'events'), event);
+      }
+
+      // For demo: store in localStorage
+      const events = JSON.parse(localStorage.getItem('cpm_events') || '[]');
+      events.push(event);
+      // Keep last 1000 events
+      if (events.length > 1000) events.shift();
+      localStorage.setItem('cpm_events', JSON.stringify(events));
+
+    } catch (error) {
+      console.error('[TRACK] Error persisting event:', error);
+    }
+  };
+
+  // Specialized tracking functions
+  const trackClick = useCallback((element, data = {}) => {
+    if (!TRACKING_CONFIG.clickTracking) return;
+    clickCount.current++;
+    track('click', {
+      element: element.tagName,
+      elementId: element.id,
+      elementClass: element.className,
+      elementText: element.innerText?.substring(0, 50),
+      ...data,
+    });
+  }, [track]);
+
+  const trackNavigation = useCallback((from, to, data = {}) => {
+    if (!TRACKING_CONFIG.navigationTracking) return;
+    pageViewCount.current++;
+    track('navigation', { from, to, ...data });
+  }, [track]);
+
+  const trackFormInteraction = useCallback((formName, action, field, data = {}) => {
+    if (!TRACKING_CONFIG.formTracking) return;
+    track('form_interaction', { formName, action, field, ...data });
+  }, [track]);
+
+  const trackError = useCallback((error, context = {}) => {
+    if (!TRACKING_CONFIG.errorTracking) return;
+    track('error', {
+      message: error.message,
+      stack: error.stack,
+      ...context,
+    });
+  }, [track]);
+
+  const trackPerformance = useCallback((metric, value, data = {}) => {
+    if (!TRACKING_CONFIG.performanceTracking) return;
+    track('performance', { metric, value, ...data });
+  }, [track]);
+
+  // Audit log (high-level business events)
+  const logAudit = useCallback((action, category, details, metadata = {}) => {
+    return track('audit', {
+      action,
+      category,
+      details,
+      metadata,
+      severity: metadata.severity || 'info',
+    });
+  }, [track]);
+
+  // Get stored events (for audit log display)
+  const getStoredEvents = useCallback((filter = {}) => {
+    try {
+      const events = JSON.parse(localStorage.getItem('cpm_events') || '[]');
+      return events
+        .filter(e => {
+          if (filter.eventName && e.eventName !== filter.eventName) return false;
+          if (filter.category && e.eventData?.category !== filter.category) return false;
+          if (filter.userId && e.userId !== filter.userId) return false;
+          return true;
+        })
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Clear stored events
+  const clearEvents = useCallback(() => {
+    localStorage.removeItem('cpm_events');
+  }, []);
+
+  // Export events as CSV
+  const exportEvents = useCallback((filter = {}) => {
+    const events = getStoredEvents(filter);
+    const headers = ['Timestamp', 'Event', 'User', 'Action', 'Category', 'Details'];
+    const rows = events.map(e => [
+      e.timestamp,
+      e.eventName,
+      e.userName,
+      e.eventData?.action || '',
+      e.eventData?.category || '',
+      e.eventData?.details || JSON.stringify(e.eventData),
+    ]);
+    
+    const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `events-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+  }, [getStoredEvents]);
+
+  const value = {
+    track,
+    trackClick,
+    trackNavigation,
+    trackFormInteraction,
+    trackError,
+    trackPerformance,
+    logAudit,
+    getStoredEvents,
+    clearEvents,
+    exportEvents,
+    sessionId,
+    isOnline,
+    config: TRACKING_CONFIG,
+  };
+
+  return (
+    <TrackingContext.Provider value={value}>
+      {children}
+    </TrackingContext.Provider>
+  );
+};
+
+// Hook to use tracking
+const useTracking = () => {
+  const context = useContext(TrackingContext);
+  if (!context) {
+    // Return no-op functions if not in provider
+    return {
+      track: () => {},
+      trackClick: () => {},
+      trackNavigation: () => {},
+      trackFormInteraction: () => {},
+      trackError: () => {},
+      trackPerformance: () => {},
+      logAudit: () => {},
+      getStoredEvents: () => [],
+      clearEvents: () => {},
+      exportEvents: () => {},
+      sessionId: null,
+      isOnline: true,
+      config: TRACKING_CONFIG,
+    };
+  }
+  return context;
+};
+
+// Helper to get console style for event type
+const getEventStyle = (eventName) => {
+  const styles = {
+    audit: 'background: #3B82F6; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;',
+    click: 'background: #10B981; color: white; padding: 2px 6px; border-radius: 3px;',
+    navigation: 'background: #8B5CF6; color: white; padding: 2px 6px; border-radius: 3px;',
+    form_interaction: 'background: #F59E0B; color: white; padding: 2px 6px; border-radius: 3px;',
+    error: 'background: #EF4444; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;',
+    performance: 'background: #6366F1; color: white; padding: 2px 6px; border-radius: 3px;',
+  };
+  return styles[eventName] || 'background: #6B7280; color: white; padding: 2px 6px; border-radius: 3px;';
+};
+
+// ============================================================================
+// CLICK TRACKING HOC
+// ============================================================================
+
+const withClickTracking = (WrappedComponent) => {
+  return function TrackedComponent(props) {
+    const { trackClick } = useTracking();
+    const ref = useRef(null);
+
+    useEffect(() => {
+      const element = ref.current;
+      if (!element) return;
+
+      const handleClick = (e) => {
+        trackClick(e.target, {
+          componentName: WrappedComponent.displayName || WrappedComponent.name,
+          ...props.trackingData,
+        });
+      };
+
+      element.addEventListener('click', handleClick);
+      return () => element.removeEventListener('click', handleClick);
+    }, [trackClick, props.trackingData]);
+
+    return <div ref={ref}><WrappedComponent {...props} /></div>;
+  };
+};
+
+// ============================================================================
+// TRACKED BUTTON COMPONENT
+// ============================================================================
+
+const TrackedButton = ({ onClick, trackingName, trackingData, children, ...props }) => {
+  const { trackClick } = useTracking();
+
+  const handleClick = (e) => {
+    trackClick(e.target, {
+      buttonName: trackingName,
+      ...trackingData,
+    });
+    onClick?.(e);
+  };
+
+  return <button onClick={handleClick} {...props}>{children}</button>;
+};
+
+// ============================================================================
+// TRACKED INPUT COMPONENT
+// ============================================================================
+
+const TrackedInput = ({ onFocus, onBlur, onChange, trackingName, ...props }) => {
+  const { trackFormInteraction } = useTracking();
+  const focusTime = useRef(null);
+
+  const handleFocus = (e) => {
+    focusTime.current = Date.now();
+    trackFormInteraction(trackingName, 'focus', props.name || props.id);
+    onFocus?.(e);
+  };
+
+  const handleBlur = (e) => {
+    const duration = focusTime.current ? Date.now() - focusTime.current : 0;
+    trackFormInteraction(trackingName, 'blur', props.name || props.id, {
+      focusDuration: duration,
+      hasValue: !!e.target.value,
+    });
+    onBlur?.(e);
+  };
+
+  const handleChange = (e) => {
+    trackFormInteraction(trackingName, 'change', props.name || props.id, {
+      valueLength: e.target.value?.length || 0,
+    });
+    onChange?.(e);
+  };
+
+  return <input onFocus={handleFocus} onBlur={handleBlur} onChange={handleChange} {...props} />;
+};
+
+// ============================================================================
+// TRACKING DASHBOARD COMPONENT
+// ============================================================================
+
+const TrackingDashboard = ({ onClose }) => {
+  const { getStoredEvents, clearEvents, exportEvents, sessionId, isOnline, config } = useTracking();
+  const [events, setEvents] = useState([]);
+  const [filter, setFilter] = useState('all');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  useEffect(() => {
+    const loadEvents = () => setEvents(getStoredEvents());
+    loadEvents();
+    
+    if (autoRefresh) {
+      const interval = setInterval(loadEvents, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [getStoredEvents, autoRefresh]);
+
+  const filteredEvents = filter === 'all' 
+    ? events 
+    : events.filter(e => e.eventName === filter);
+
+  const eventCounts = events.reduce((acc, e) => {
+    acc[e.eventName] = (acc[e.eventName] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+              <Activity className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800">Tracking Dashboard</h2>
+              <p className="text-xs text-gray-500">Session: {sessionId?.substring(0, 20)}...</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
+              {isOnline ? 'Online' : 'Offline'}
+            </span>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="p-4 border-b border-gray-200 flex-shrink-0">
+          <div className="grid grid-cols-6 gap-3">
+            {['audit', 'click', 'navigation', 'form_interaction', 'error', 'performance'].map(type => (
+              <button
+                key={type}
+                onClick={() => setFilter(filter === type ? 'all' : type)}
+                className={`p-3 rounded-lg text-center transition-all ${
+                  filter === type ? 'bg-blue-100 border-2 border-blue-500' : 'bg-gray-50 border-2 border-transparent hover:bg-gray-100'
+                }`}
+              >
+                <p className="text-2xl font-bold text-gray-800">{eventCounts[type] || 0}</p>
+                <p className="text-xs text-gray-500 capitalize">{type.replace('_', ' ')}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input 
+                type="checkbox" 
+                checked={autoRefresh} 
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Auto-refresh
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportEvents()}
+              className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-700"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => { clearEvents(); setEvents([]); }}
+              className="flex items-center gap-2 px-3 py-1.5 bg-red-100 hover:bg-red-200 rounded-lg text-sm text-red-700"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        {/* Event List */}
+        <div className="flex-1 overflow-auto p-4">
+          {filteredEvents.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <Activity className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p>No events recorded yet</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredEvents.slice(0, 100).map((event, idx) => (
+                <div key={idx} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        event.eventName === 'audit' ? 'bg-blue-100 text-blue-700' :
+                        event.eventName === 'click' ? 'bg-green-100 text-green-700' :
+                        event.eventName === 'navigation' ? 'bg-purple-100 text-purple-700' :
+                        event.eventName === 'form_interaction' ? 'bg-amber-100 text-amber-700' :
+                        event.eventName === 'error' ? 'bg-red-100 text-red-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {event.eventName}
+                      </span>
+                      <span className="text-sm font-medium text-gray-800">
+                        {event.eventData?.action || event.eventData?.buttonName || event.eventData?.element || 'Event'}
+                      </span>
+                    </div>
+                    <span className="text-xs text-gray-400 font-mono">
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    <span className="mr-3">User: {event.userName}</span>
+                    {event.eventData?.category && <span className="mr-3">Category: {event.eventData.category}</span>}
+                    {event.eventData?.details && <span className="truncate">{event.eventData.details.substring(0, 80)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Config Status */}
+        <div className="p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+          <p className="text-xs text-gray-500 mb-2">Active Tracking Modules:</p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(config).filter(([k, v]) => v === true && k !== 'enabled').map(([key]) => (
+              <span key={key} className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">
+                {key.replace(/([A-Z])/g, ' $1').trim()}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// ORIGINAL CODE CONTINUES BELOW
+// ============================================================================
 
 // Empty data - no sample data
 const mockPayments = [];
@@ -354,6 +894,7 @@ export default function PaymentControlModule() {
   const [rejectPayment, setRejectPayment] = useState(null);
   const [dismissingDetail, setDismissingDetail] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showTrackingDashboard, setShowTrackingDashboard] = useState(false);
   const [notifications] = useState(mockNotifications);
   const [payments, setPayments] = useState(SAMPLE_PAYMENTS);
   const [templates, setTemplates] = useState(SAMPLE_TEMPLATES);
@@ -361,9 +902,18 @@ export default function PaymentControlModule() {
   const [users, setUsers] = useState(SAMPLE_USERS);
   const [roles, setRoles] = useState(SAMPLE_ROLES);
 
+  // Use tracking hook
+  const { track, trackNavigation, logAudit, getStoredEvents } = useTracking();
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Add audit log entry
+  // Track tab changes
+  const handleTabChange = (newTab) => {
+    trackNavigation(activeTab, newTab, { userId: currentUser?.id });
+    setActiveTab(newTab);
+  };
+
+  // Add audit log entry (enhanced with tracking)
   const addAuditLog = (action, category, details, metadata = {}) => {
     const newLog = {
       id: `AUD-${String(auditLogs.length + 1).padStart(3, '0')}`,
@@ -379,7 +929,10 @@ export default function PaymentControlModule() {
       metadata,
     };
     setAuditLogs([newLog, ...auditLogs]);
-    console.log('[AUDIT]', newLog); // Also log to console for debugging
+    console.log('[AUDIT]', newLog);
+    
+    // Also track to persistent storage
+    logAudit(action, category, details, metadata);
   };
 
   // Handle login
@@ -402,12 +955,28 @@ export default function PaymentControlModule() {
       };
       setAuditLogs(prev => [loginLog, ...prev]);
       console.log('[AUDIT]', loginLog);
+      
+      // Track to persistent storage
+      track('audit', {
+        action: 'User Login',
+        category: 'auth',
+        details: `${user.name} logged in successfully`,
+        userId: user.id,
+        email: user.email,
+        role: user.roleName,
+      });
     }, 100);
   };
 
   // Handle logout
   const handleLogout = () => {
     addAuditLog('User Logout', 'auth', `${currentUser?.name} logged out`, { email: currentUser?.email });
+    track('audit', {
+      action: 'User Logout', 
+      category: 'auth',
+      details: `${currentUser?.name} logged out`,
+      userId: currentUser?.id,
+    });
     setCurrentUser(null);
     setShowUserMenu(false);
   };
@@ -463,7 +1032,11 @@ export default function PaymentControlModule() {
 
   // Show login screen if not logged in
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} users={SAMPLE_USERS} />;
+    return (
+      <TrackingProvider currentUser={null}>
+        <LoginScreen onLogin={handleLogin} users={SAMPLE_USERS} />
+      </TrackingProvider>
+    );
   }
 
   const cpmSubTabs = [
@@ -480,6 +1053,7 @@ export default function PaymentControlModule() {
   ];
 
   return (
+    <TrackingProvider currentUser={currentUser}>
     <div className="min-h-screen bg-gray-50 flex">
       <aside className="w-64 bg-slate-900 text-white flex flex-col">
         <div className="p-4 border-b border-slate-700">
@@ -504,7 +1078,7 @@ export default function PaymentControlModule() {
             {cpmSubTabs.map(item => (
               <li key={item.id}>
                 <button
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => handleTabChange(item.id)}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm ${
                     activeTab === item.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                   }`}
@@ -529,7 +1103,7 @@ export default function PaymentControlModule() {
                 {adminTabs.map(item => (
                   <li key={item.id}>
                     <button
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => handleTabChange(item.id)}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm ${
                         activeTab === item.id ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                       }`}
@@ -566,6 +1140,15 @@ export default function PaymentControlModule() {
                 <p className="text-xs text-slate-400">{currentUser.email}</p>
                 <p className="text-xs text-slate-500 mt-1">Department: {currentUser.department}</p>
               </div>
+              {currentUser.isSuperAdmin && (
+                <button
+                  onClick={() => { setShowTrackingDashboard(true); setShowUserMenu(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left text-blue-400 hover:bg-slate-700 transition-colors border-b border-slate-700"
+                >
+                  <Activity className="w-4 h-4" />
+                  <span className="text-sm font-medium">Tracking Dashboard</span>
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-left text-red-400 hover:bg-slate-700 transition-colors"
@@ -689,8 +1272,29 @@ export default function PaymentControlModule() {
           onReject={handleRejectComplete}
         />
       )}
+      {showTrackingDashboard && (
+        <TrackingDashboard onClose={() => setShowTrackingDashboard(false)} />
+      )}
     </div>
+    </TrackingProvider>
   );
+}
+
+// Wrapped export with TrackingProvider
+function PaymentControlModuleWithTracking() {
+  const [currentUser, setCurrentUser] = useState(null);
+  
+  return (
+    <TrackingProvider currentUser={currentUser}>
+      <PaymentControlModuleInner onUserChange={setCurrentUser} />
+    </TrackingProvider>
+  );
+}
+
+// Inner component - receives user change callback
+function PaymentControlModuleInner({ onUserChange }) {
+  // This is now handled in the main component
+  return <PaymentControlModule />;
 }
 
 // Integrations Panel - API Configuration
