@@ -2084,6 +2084,34 @@ function ControlsPanel({ users, roles, onAuditLog }) {
     },
   });
 
+  // Per-Role Approval Limits
+  const [roleApprovalLimits, setRoleApprovalLimits] = useState({
+    bank: {
+      'Analyst': { maxSingle: null, daily: null, enabled: false },
+      'Sr. Analyst': { maxSingle: 100000, daily: 400000, enabled: true },
+      'Manager': { maxSingle: 500000, daily: 1500000, enabled: true },
+      'Director': { maxSingle: null, daily: null, enabled: false },
+      'CFO': { maxSingle: null, daily: null, enabled: false },
+    },
+    commercial: {
+      'Analyst': { maxSingle: null, daily: null, enabled: false },
+      'Sr. Analyst': { maxSingle: 50000, daily: 200000, enabled: true },
+      'Manager': { maxSingle: 250000, daily: 750000, enabled: true },
+      'Director': { maxSingle: null, daily: null, enabled: false },
+      'CFO': { maxSingle: null, daily: null, enabled: false },
+    },
+    individual: {
+      'Analyst': { maxSingle: null, daily: null, enabled: false },
+      'Sr. Analyst': { maxSingle: null, daily: null, enabled: false },
+      'Manager': { maxSingle: 100000, daily: 300000, enabled: true },
+      'Director': { maxSingle: null, daily: null, enabled: false },
+      'CFO': { maxSingle: null, daily: null, enabled: false },
+    },
+  });
+
+  // Time Controls Toggle
+  const [timeControlsEnabled, setTimeControlsEnabled] = useState(true);
+
   // Scheduling State
   const [operatingWindows, setOperatingWindows] = useState({
     bank: { fednow: { start: '06:00', end: '22:00', enabled: true }, rtp: { start: '00:00', end: '23:59', enabled: true } },
@@ -2493,12 +2521,12 @@ function ControlsPanel({ users, roles, onAuditLog }) {
                           <thead>
                             <tr className="text-gray-500">
                               <th className="text-left py-1 font-medium">Role</th>
-                              <th className="text-center py-1 font-medium">Init</th>
-                              <th className="text-center py-1 font-medium">Appr</th>
-                              <th className="text-center py-1 font-medium">Edit</th>
-                              <th className="text-center py-1 font-medium">Canc</th>
-                              <th className="text-center py-1 font-medium">Tpl</th>
-                              <th className="text-center py-1 font-medium">Ctrl</th>
+                              <th className="text-center py-1 font-medium" title="Initiation">Initiation</th>
+                              <th className="text-center py-1 font-medium" title="Approval">Approval</th>
+                              <th className="text-center py-1 font-medium" title="Edit">Edit</th>
+                              <th className="text-center py-1 font-medium" title="Cancel">Cancel</th>
+                              <th className="text-center py-1 font-medium" title="Template">Template</th>
+                              <th className="text-center py-1 font-medium" title="Controls">Controls</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2530,7 +2558,7 @@ function ControlsPanel({ users, roles, onAuditLog }) {
                 </div>
 
                 {/* Per-Role Initiation Limits */}
-                <div>
+                <div className="mb-8">
                   <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Per-Role Initiation Limits</h4>
                   <p className="text-xs text-gray-400 mb-4">Maximum amounts each role can initiate. Blue dot = override enabled.</p>
                   
@@ -2541,7 +2569,7 @@ function ControlsPanel({ users, roles, onAuditLog }) {
                           <thead>
                             <tr className="text-gray-500">
                               <th className="text-left py-1 font-medium">Role</th>
-                              <th className="text-right py-1 font-medium">Max Sngl</th>
+                              <th className="text-right py-1 font-medium">Max Single</th>
                               <th className="text-right py-1 font-medium">Daily</th>
                               <th className="w-4"></th>
                             </tr>
@@ -2595,6 +2623,73 @@ function ControlsPanel({ users, roles, onAuditLog }) {
                     ))}
                   </div>
                 </div>
+
+                {/* Per-Role Approval Limits */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Per-Role Approval Limits</h4>
+                  <p className="text-xs text-gray-400 mb-4">Maximum amounts each role can approve. Green dot = override enabled.</p>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    {instructionTypes.map(type => (
+                      <TypeCard key={type.id} type={type.id}>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-500">
+                              <th className="text-left py-1 font-medium">Role</th>
+                              <th className="text-right py-1 font-medium">Max Single</th>
+                              <th className="text-right py-1 font-medium">Daily</th>
+                              <th className="w-4"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(roleApprovalLimits[type.id]).map(([role, limits]) => (
+                              <tr key={role} className="border-t border-gray-100">
+                                <td className={`py-2 font-medium ${limits.enabled ? 'text-gray-700' : 'text-gray-400'}`}>{role}</td>
+                                <td className="text-right py-2">
+                                  {limits.enabled ? (
+                                    <input 
+                                      type="text" 
+                                      value={limits.maxSingle?.toLocaleString() || ''} 
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value.replace(/,/g, '')) || null;
+                                        const newLimits = { ...roleApprovalLimits };
+                                        newLimits[type.id][role].maxSingle = val;
+                                        setRoleApprovalLimits(newLimits);
+                                      }}
+                                      className="w-20 px-2 py-1 border border-gray-200 rounded text-right text-xs"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="text-right py-2">
+                                  {limits.enabled ? (
+                                    <input 
+                                      type="text" 
+                                      value={limits.daily?.toLocaleString() || ''} 
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value.replace(/,/g, '')) || null;
+                                        const newLimits = { ...roleApprovalLimits };
+                                        newLimits[type.id][role].daily = val;
+                                        setRoleApprovalLimits(newLimits);
+                                      }}
+                                      className="w-20 px-2 py-1 border border-gray-200 rounded text-right text-xs"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="text-center">
+                                  {limits.enabled && <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </TypeCard>
+                    ))}
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -2610,12 +2705,29 @@ function ControlsPanel({ users, roles, onAuditLog }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-600">Time Controls</span>
-                    <button className="w-12 h-6 rounded-full bg-blue-600">
-                      <div className="w-5 h-5 bg-white rounded-full shadow translate-x-6" />
+                    <button 
+                      onClick={() => {
+                        setTimeControlsEnabled(!timeControlsEnabled);
+                        onAuditLog?.('Time Controls Toggled', 'config', `Time controls ${!timeControlsEnabled ? 'enabled' : 'disabled'}`, { enabled: !timeControlsEnabled });
+                      }}
+                      className={`w-12 h-6 rounded-full transition-colors ${timeControlsEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${timeControlsEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
                 </div>
 
+                {!timeControlsEnabled && (
+                  <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-amber-800">
+                      <AlertTriangle className="w-5 h-5" />
+                      <p className="font-medium">Time Controls Disabled</p>
+                    </div>
+                    <p className="text-sm text-amber-700 mt-1">All operating window and role time restrictions are currently bypassed. Payments can be processed 24/7.</p>
+                  </div>
+                )}
+
+                <div className={timeControlsEnabled ? '' : 'opacity-50 pointer-events-none'}>
                 {/* Operating Windows */}
                 <div className="mb-8">
                   <h4 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-1">Operating Windows</h4>
@@ -2755,6 +2867,7 @@ function ControlsPanel({ users, roles, onAuditLog }) {
                       </TypeCard>
                     ))}
                   </div>
+                </div>
                 </div>
               </div>
             </>
@@ -2970,13 +3083,113 @@ function NewPaymentModal({ onClose, onCreate }) {
     recipient: '',
     recipientRtn: '',
     recipientAccount: '',
-    fromAccount: 'Operating Account ****1234',
+    fromAccount: '',
+    fromAccountNumber: '',
     amount: '',
     rail: 'FedNow',
     memo: '',
     instructionType: 'bank_initiated',
   });
   const [rtnInfo, setRtnInfo] = useState(null);
+  const [accountMode, setAccountMode] = useState('select'); // 'select' or 'manual'
+  const [selectedAccount, setSelectedAccount] = useState(null);
+
+  // Sample accounts with balances and recent activity
+  const sampleAccounts = [
+    { 
+      id: 'acc1', 
+      name: 'Operating Account', 
+      number: '****1234', 
+      fullNumber: '9876543211234',
+      balance: 2450000, 
+      available: 2350000,
+      type: 'checking',
+      recentActivity: [
+        { id: 1, date: '2026-03-28', description: 'Wire to Acme Corp', amount: -125000, status: 'completed' },
+        { id: 2, date: '2026-03-27', description: 'Deposit - Client Payment', amount: 500000, status: 'completed' },
+        { id: 3, date: '2026-03-27', description: 'FedNow to Vendor Inc', amount: -45000, status: 'completed' },
+      ]
+    },
+    { 
+      id: 'acc2', 
+      name: 'Payroll Account', 
+      number: '****5678', 
+      fullNumber: '9876543215678',
+      balance: 850000, 
+      available: 850000,
+      type: 'checking',
+      recentActivity: [
+        { id: 1, date: '2026-03-25', description: 'Payroll Run - March', amount: -425000, status: 'completed' },
+        { id: 2, date: '2026-03-15', description: 'Payroll Funding', amount: 500000, status: 'completed' },
+      ]
+    },
+    { 
+      id: 'acc3', 
+      name: 'Reserve Account', 
+      number: '****9012', 
+      fullNumber: '9876543219012',
+      balance: 5000000, 
+      available: 5000000,
+      type: 'savings',
+      recentActivity: [
+        { id: 1, date: '2026-03-01', description: 'Monthly Interest', amount: 12500, status: 'completed' },
+      ]
+    },
+    { 
+      id: 'acc4', 
+      name: 'Treasury Account', 
+      number: '****3456', 
+      fullNumber: '9876543213456',
+      balance: 12500000, 
+      available: 12000000,
+      type: 'checking',
+      recentActivity: [
+        { id: 1, date: '2026-03-28', description: 'Investment Purchase', amount: -500000, status: 'pending' },
+        { id: 2, date: '2026-03-26', description: 'Bond Maturity', amount: 1000000, status: 'completed' },
+      ]
+    },
+  ];
+
+  // Manual account lookup simulation
+  const [manualAccountInfo, setManualAccountInfo] = useState(null);
+  const [lookingUpAccount, setLookingUpAccount] = useState(false);
+
+  const handleAccountLookup = () => {
+    if (formData.fromAccountNumber.length >= 8) {
+      setLookingUpAccount(true);
+      // Simulate API lookup
+      setTimeout(() => {
+        // Check if it matches any sample account
+        const found = sampleAccounts.find(a => a.fullNumber === formData.fromAccountNumber);
+        if (found) {
+          setManualAccountInfo(found);
+        } else {
+          // Generate mock data for unknown account
+          setManualAccountInfo({
+            id: 'manual',
+            name: 'External Account',
+            number: `****${formData.fromAccountNumber.slice(-4)}`,
+            fullNumber: formData.fromAccountNumber,
+            balance: null, // Unknown for external
+            available: null,
+            type: 'unknown',
+            recentActivity: [],
+            isExternal: true,
+          });
+        }
+        setLookingUpAccount(false);
+      }, 800);
+    }
+  };
+
+  const handleSelectAccount = (account) => {
+    setSelectedAccount(account);
+    setFormData({ 
+      ...formData, 
+      fromAccount: `${account.name} ${account.number}`,
+      fromAccountNumber: account.fullNumber,
+    });
+  };
 
   const handleRtnChange = (value) => {
     setFormData({ ...formData, recipientRtn: value });
@@ -2989,18 +3202,27 @@ function NewPaymentModal({ onClose, onCreate }) {
 
   const handleSubmit = () => {
     if (!formData.recipient || !formData.amount || !formData.recipientRtn || !formData.recipientAccount) return;
+    if (!formData.fromAccount && !formData.fromAccountNumber) return;
+    
     onCreate({
       ...formData,
       amount: parseFloat(formData.amount),
       recipientAccount: `****${formData.recipientAccount.slice(-4)}`,
+      fromAccount: formData.fromAccount || `Account ****${formData.fromAccountNumber.slice(-4)}`,
     });
   };
 
-  const isValid = formData.recipient && formData.amount && formData.recipientRtn.length === 9 && formData.recipientAccount;
+  const isValid = formData.recipient && 
+    formData.amount && 
+    formData.recipientRtn.length === 9 && 
+    formData.recipientAccount &&
+    (formData.fromAccount || formData.fromAccountNumber);
+
+  const activeAccount = selectedAccount || manualAccountInfo;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
-      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl mx-4">
+      <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl mx-4">
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-gray-800">New Payment</h2>
@@ -3008,21 +3230,144 @@ function NewPaymentModal({ onClose, onCreate }) {
           </div>
         </div>
         
-        <div className="p-6 space-y-5 max-h-[60vh] overflow-y-auto">
-          {/* From Account */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">From Account</label>
-            <select
-              value={formData.fromAccount}
-              onChange={e => setFormData({ ...formData, fromAccount: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            >
-              {fromAccounts.filter(a => a.type === 'account').map(acc => (
-                <option key={acc.id} value={`${acc.name} ${acc.number}`}>
-                  {acc.name} ({acc.number}) - ${acc.balance?.toLocaleString()}
-                </option>
-              ))}
-            </select>
+        <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+          {/* From Account Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">From Account *</label>
+              <div className="flex items-center gap-1 p-0.5 bg-gray-100 rounded-lg">
+                <button
+                  onClick={() => { setAccountMode('select'); setManualAccountInfo(null); }}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                    accountMode === 'select' ? 'bg-white shadow text-gray-800' : 'text-gray-500'
+                  }`}
+                >
+                  Select Account
+                </button>
+                <button
+                  onClick={() => { setAccountMode('manual'); setSelectedAccount(null); }}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                    accountMode === 'manual' ? 'bg-white shadow text-gray-800' : 'text-gray-500'
+                  }`}
+                >
+                  Enter Manually
+                </button>
+              </div>
+            </div>
+
+            {accountMode === 'select' ? (
+              <div className="grid grid-cols-2 gap-3">
+                {sampleAccounts.map(acc => (
+                  <button
+                    key={acc.id}
+                    onClick={() => handleSelectAccount(acc)}
+                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      selectedAccount?.id === acc.id 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-gray-800 text-sm">{acc.name}</span>
+                      <span className="text-xs text-gray-500 font-mono">{acc.number}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">Available</span>
+                      <span className="text-sm font-semibold text-green-600">${acc.available?.toLocaleString()}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formData.fromAccountNumber}
+                    onChange={e => {
+                      setFormData({ ...formData, fromAccountNumber: e.target.value.replace(/\D/g, '') });
+                      setManualAccountInfo(null);
+                    }}
+                    placeholder="Enter full account number"
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
+                  />
+                  <button
+                    onClick={handleAccountLookup}
+                    disabled={formData.fromAccountNumber.length < 8 || lookingUpAccount}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {lookingUpAccount ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                    Lookup
+                  </button>
+                </div>
+                {manualAccountInfo?.isExternal && (
+                  <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs text-amber-700 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      External account - balance unavailable. Ensure sufficient funds before proceeding.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Account Details Panel */}
+            {activeAccount && (
+              <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h4 className="font-medium text-gray-800">{activeAccount.name}</h4>
+                    <p className="text-xs text-gray-500 font-mono">{activeAccount.number}</p>
+                  </div>
+                  {activeAccount.balance !== null && (
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Available Balance</p>
+                      <p className="text-lg font-bold text-green-600">${activeAccount.available?.toLocaleString()}</p>
+                      {activeAccount.balance !== activeAccount.available && (
+                        <p className="text-xs text-gray-400">Total: ${activeAccount.balance?.toLocaleString()}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Recent Activity */}
+                {activeAccount.recentActivity?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Recent Activity</p>
+                    <div className="space-y-1.5">
+                      {activeAccount.recentActivity.slice(0, 3).map(tx => (
+                        <div key={tx.id} className="flex items-center justify-between py-1.5 px-2 bg-white rounded border border-gray-100">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                              tx.amount > 0 ? 'bg-green-100' : 'bg-red-100'
+                            }`}>
+                              {tx.amount > 0 
+                                ? <ArrowUpRight className="w-3 h-3 text-green-600 rotate-180" />
+                                : <ArrowUpRight className="w-3 h-3 text-red-600" />
+                              }
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium text-gray-700">{tx.description}</p>
+                              <p className="text-[10px] text-gray-400">{tx.date}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-xs font-medium ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                            </p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              tx.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {tx.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Recipient Name */}
@@ -3082,6 +3427,13 @@ function NewPaymentModal({ onClose, onCreate }) {
                 className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            {/* Amount warning if exceeds available */}
+            {activeAccount?.available && formData.amount && parseFloat(formData.amount) > activeAccount.available && (
+              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Amount exceeds available balance (${activeAccount.available.toLocaleString()})
+              </p>
+            )}
           </div>
 
           {/* Rail Selection */}
@@ -3684,13 +4036,36 @@ function FIAdminPanel({ currentUser }) {
 }
 
 // Admin Users Panel
-function AdminUsersPanel({ users, setUsers, roles, departments, isSuperAdmin, onCreateUser }) {
+function AdminUsersPanel({ users, setUsers, roles, departments, isSuperAdmin, onCreateUser, pendingChanges, setPendingChanges, currentUser }) {
   const [search, setSearch] = useState('');
+  const [editingUser, setEditingUser] = useState(null);
   
   const filtered = users.filter(u => 
     u.name?.toLowerCase().includes(search.toLowerCase()) ||
     u.email?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleSaveUser = (updatedUser) => {
+    if (isSuperAdmin) {
+      setPendingChanges([...pendingChanges, {
+        id: `CHG-${Date.now()}`,
+        type: 'user_edit',
+        requestedBy: currentUser.id,
+        requestedByName: currentUser.name,
+        requestedAt: new Date().toISOString(),
+        status: 'pending',
+        data: updatedUser,
+        originalData: users.find(u => u.id === updatedUser.id),
+      }]);
+    } else {
+      setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
+    }
+    setEditingUser(null);
+  };
+
+  const handleDisableUser = (userId) => {
+    setUsers(users.map(u => u.id === userId ? { ...u, status: u.status === 'active' ? 'inactive' : 'active' } : u));
+  };
 
   return (
     <div className="space-y-4">
@@ -3764,10 +4139,18 @@ function AdminUsersPanel({ users, setUsers, roles, departments, isSuperAdmin, on
                   <td className="px-4 py-3"><StatusBadge status={user.status} /></td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded">
+                      <button 
+                        onClick={() => setEditingUser(user)}
+                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+                        title="Edit user"
+                      >
                         <Edit className="w-4 h-4" />
                       </button>
-                      <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                      <button 
+                        onClick={() => handleDisableUser(user.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                        title={user.status === 'active' ? 'Disable user' : 'Enable user'}
+                      >
                         <UserX className="w-4 h-4" />
                       </button>
                     </div>
@@ -3778,12 +4161,182 @@ function AdminUsersPanel({ users, setUsers, roles, departments, isSuperAdmin, on
           </table>
         </div>
       )}
+
+      {/* Edit User Modal */}
+      {editingUser && (
+        <AdminEditUserModal
+          user={editingUser}
+          roles={roles}
+          departments={departments}
+          onClose={() => setEditingUser(null)}
+          onSave={handleSaveUser}
+          requiresApproval={isSuperAdmin}
+        />
+      )}
+    </div>
+  );
+}
+
+// Admin Edit User Modal
+function AdminEditUserModal({ user, roles, departments, onClose, onSave, requiresApproval }) {
+  const [formData, setFormData] = useState({
+    ...user,
+  });
+
+  const handleSubmit = () => {
+    onSave(formData);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">Edit User</h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={e => setFormData({ ...formData, email: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <select
+              value={formData.roleId}
+              onChange={e => {
+                const role = roles.find(r => r.id === e.target.value);
+                setFormData({ 
+                  ...formData, 
+                  roleId: e.target.value, 
+                  roleName: role?.name,
+                  isSuperAdmin: role?.isSuperAdmin || false,
+                });
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+            >
+              {roles.map(role => (
+                <option key={role.id} value={role.id}>{role.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+            <select
+              value={formData.department}
+              onChange={e => setFormData({ ...formData, department: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+            >
+              {departments.map(dept => (
+                <option key={dept.id} value={dept.name}>{dept.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Initiation Limit Override</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                <input
+                  type="number"
+                  value={formData.initiationLimit || ''}
+                  onChange={e => setFormData({ ...formData, initiationLimit: e.target.value ? parseInt(e.target.value) : null })}
+                  placeholder="Use role default"
+                  className="w-full pl-7 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Approval Limit Override</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                <input
+                  type="number"
+                  value={formData.approvalLimit || ''}
+                  onChange={e => setFormData({ ...formData, approvalLimit: e.target.value ? parseInt(e.target.value) : null })}
+                  placeholder="Use role default"
+                  className="w-full pl-7 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {requiresApproval && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Changes require approval from another Super Admin
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            {requiresApproval ? 'Submit for Approval' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // Admin Roles Panel
-function AdminRolesPanel({ roles, setRoles, isSuperAdmin, onCreateRole }) {
+function AdminRolesPanel({ roles, setRoles, isSuperAdmin, onCreateRole, pendingChanges, setPendingChanges, currentUser }) {
+  const [editingRole, setEditingRole] = useState(null);
+
+  const handleSaveRole = (updatedRole) => {
+    if (isSuperAdmin) {
+      setPendingChanges([...pendingChanges, {
+        id: `CHG-${Date.now()}`,
+        type: 'role_edit',
+        requestedBy: currentUser.id,
+        requestedByName: currentUser.name,
+        requestedAt: new Date().toISOString(),
+        status: 'pending',
+        data: updatedRole,
+        originalData: roles.find(r => r.id === updatedRole.id),
+      }]);
+    } else {
+      setRoles(roles.map(r => r.id === updatedRole.id ? updatedRole : r));
+    }
+    setEditingRole(null);
+  };
+
+  const handleDeleteRole = (roleId) => {
+    if (confirm('Are you sure you want to delete this role?')) {
+      setRoles(roles.filter(r => r.id !== roleId));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -3825,31 +4378,207 @@ function AdminRolesPanel({ roles, setRoles, isSuperAdmin, onCreateRole }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded">
+                  <button 
+                    onClick={() => setEditingRole(role)}
+                    className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+                    title="Edit role"
+                  >
                     <Edit className="w-4 h-4" />
                   </button>
                   {!role.isSystemRole && (
-                    <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                    <button 
+                      onClick={() => handleDeleteRole(role.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                      title="Delete role"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
                 </div>
               </div>
-              {role.approvalLimit && (
-                <p className="text-sm text-gray-600">
-                  Approval limit: <span className="font-medium">${role.approvalLimit.toLocaleString()}</span>
-                </p>
-              )}
+              <div className="space-y-1 text-sm text-gray-600">
+                {role.initiationLimit && (
+                  <p>Initiation limit: <span className="font-medium">${role.initiationLimit.toLocaleString()}</span></p>
+                )}
+                {role.approvalLimit && (
+                  <p>Approval limit: <span className="font-medium">${role.approvalLimit.toLocaleString()}</span></p>
+                )}
+                {!role.initiationLimit && !role.approvalLimit && role.isSuperAdmin && (
+                  <p className="text-purple-600 font-medium">Unlimited access</p>
+                )}
+              </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Edit Role Modal */}
+      {editingRole && (
+        <AdminEditRoleModal
+          role={editingRole}
+          onClose={() => setEditingRole(null)}
+          onSave={handleSaveRole}
+          requiresApproval={isSuperAdmin}
+        />
+      )}
+    </div>
+  );
+}
+
+// Admin Edit Role Modal
+function AdminEditRoleModal({ role, onClose, onSave, requiresApproval }) {
+  const [formData, setFormData] = useState({ ...role });
+
+  const permissionCategories = {
+    Payments: ['initiate_payments', 'approve_payments', 'reject_payments', 'cancel_payments', 'view_all_payments'],
+    Templates: ['create_templates', 'edit_templates', 'delete_templates', 'use_templates'],
+    'User Management': ['view_users', 'create_users', 'edit_users', 'disable_users'],
+    Controls: ['view_controls', 'edit_controls'],
+    'Role Management': ['view_roles', 'create_roles', 'edit_roles', 'delete_roles'],
+    Organization: ['manage_departments'],
+    Audit: ['view_audit_logs', 'export_audit_logs'],
+  };
+
+  const togglePermission = (perm) => {
+    const perms = formData.permissions || [];
+    if (perms.includes(perm)) {
+      setFormData({ ...formData, permissions: perms.filter(p => p !== perm) });
+    } else {
+      setFormData({ ...formData, permissions: [...perms, perm] });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl mx-4">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">Edit Role: {role.name}</h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <XCircle className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role Name</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              disabled={role.isSystemRole}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <input
+              type="text"
+              value={formData.description || ''}
+              onChange={e => setFormData({ ...formData, description: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Initiation Limit</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                <input
+                  type="number"
+                  value={formData.initiationLimit || ''}
+                  onChange={e => setFormData({ ...formData, initiationLimit: e.target.value ? parseInt(e.target.value) : null })}
+                  placeholder="Unlimited"
+                  disabled={role.isSuperAdmin}
+                  className="w-full pl-7 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Approval Limit</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                <input
+                  type="number"
+                  value={formData.approvalLimit || ''}
+                  onChange={e => setFormData({ ...formData, approvalLimit: e.target.value ? parseInt(e.target.value) : null })}
+                  placeholder="Unlimited"
+                  disabled={role.isSuperAdmin}
+                  className="w-full pl-7 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">Permissions</label>
+            <div className="space-y-4">
+              {Object.entries(permissionCategories).map(([category, perms]) => (
+                <div key={category} className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-700 mb-2">{category}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {perms.map(perm => (
+                      <label key={perm} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={formData.permissions?.includes(perm) || false}
+                          onChange={() => togglePermission(perm)}
+                          disabled={role.isSuperAdmin}
+                          className="rounded border-gray-300 text-purple-600"
+                        />
+                        <span className="text-gray-600">{perm.replace(/_/g, ' ')}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {requiresApproval && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Changes require approval from another Super Admin
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(formData)}
+            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            {requiresApproval ? 'Submit for Approval' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // Admin Departments Panel
 function AdminDepartmentsPanel({ departments, setDepartments, onCreateDept }) {
+  const [editingDept, setEditingDept] = useState(null);
+
+  const handleSaveDept = (updatedDept) => {
+    setDepartments(departments.map(d => d.id === updatedDept.id ? updatedDept : d));
+    setEditingDept(null);
+  };
+
+  const handleDeleteDept = (deptId) => {
+    if (confirm('Are you sure you want to delete this department?')) {
+      setDepartments(departments.filter(d => d.id !== deptId));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -3891,10 +4620,18 @@ function AdminDepartmentsPanel({ departments, setDepartments, onCreateDept }) {
                   <td className="px-4 py-3 text-sm text-gray-600">{dept.userCount || 0}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded">
+                      <button 
+                        onClick={() => setEditingDept(dept)}
+                        className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+                        title="Edit department"
+                      >
                         <Edit className="w-4 h-4" />
                       </button>
-                      <button className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                      <button 
+                        onClick={() => handleDeleteDept(dept.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                        title="Delete department"
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -3903,6 +4640,45 @@ function AdminDepartmentsPanel({ departments, setDepartments, onCreateDept }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Edit Department Modal */}
+      {editingDept && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-800">Edit Department</h2>
+                <button onClick={() => setEditingDept(null)} className="p-2 hover:bg-gray-100 rounded-lg">
+                  <XCircle className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Department Name</label>
+              <input
+                type="text"
+                value={editingDept.name}
+                onChange={e => setEditingDept({ ...editingDept, name: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+              <button onClick={() => setEditingDept(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSaveDept(editingDept)}
+                disabled={!editingDept.name}
+                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
